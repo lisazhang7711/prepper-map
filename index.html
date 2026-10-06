@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>北苑生存资源三维图 · 公网静态版</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cesium@1.115.0/Build/Cesium/Widgets/widgets.css">
+<link rel="stylesheet" href="css/app.css?v=100">
+<script>window.CESIUM_BASE_URL = 'https://cdn.jsdelivr.net/npm/cesium@1.115.0/Build/Cesium/';</script>
+</head>
+<body>
+
+<div id="file-warning" style="display:none">直接双击打开时浏览器会禁止加载地图瓦片（跨域限制）——请关闭本页，双击目录里的 <b>open-map.bat</b> 启动（会弹出一个黑色小窗口保持不关，然后自动打开地图）。</div>
+<div id="wrap">
+
+  <!-- ============ 顶栏 ============ -->
+  <header id="topbar">
+    <div class="brand">
+      <span class="dot"></span>
+      <div>
+        <h1>北苑片区 · 生存资源三维地图</h1>
+        <p id="brand-sub">DEMO — 建筑与 POI 来自 OpenStreetMap 真实数据</p>
+        <span id="netmode-badge" class="badge direct">直连模式</span>
+      </div>
+    </div>
+
+    <div class="top-tools">
+      <label class="sel">
+        底图
+        <select id="basemap">
+          <option value="osm">OSM 标准图（默认）</option>
+          <option value="esri">Esri 卫星影像</option>
+        </select>
+      </label>
+      <label class="sel">
+        视角
+        <select id="viewmode">
+          <option value="street">低空贴地</option>
+          <option value="tilt">倾斜俯瞰</option>
+          <option value="top">正射俯视</option>
+          <option value="district">周边地区概览</option>
+        </select>
+      </label>
+      <div class="searchbox">
+        <input id="search" placeholder="搜索资源点，例如 加油站 / 酒店" autocomplete="off">
+        <div id="search-list"></div>
+      </div>
+      <button id="btn-reset" class="btn ghost">重置视角</button>
+    </div>
+  </header>
+
+  <!-- ============ 主体 ============ -->
+  <main id="main">
+
+    <!-- 侧栏 -->
+    <aside id="side">
+
+      <section class="panel">
+        <div class="panel-h">
+          <span>资源图层</span>
+          <span class="hint" id="stat-count">—</span>
+        </div>
+        <div id="legend" class="legend"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-h">显示项</div>
+        <div class="toggles">
+          <label class="tg"><input type="checkbox" id="tg-dim"><span>淡化底图（默认关闭·保持原色）</span></label>
+          <label class="tg"><input type="checkbox" id="tg-build" checked><span>建筑体块</span></label>
+          <label class="tg"><input type="checkbox" id="tg-leader" checked><span>资源点引线</span></label>
+          <label class="tg"><input type="checkbox" id="tg-label" checked><span>资源点信息卡</span></label>
+          <label class="tg"><input type="checkbox" id="tg-coord" checked><span>卡片显示经纬度</span></label>
+          <label class="tg"><input type="checkbox" id="tg-core" checked><span>只看宅边地块</span></label>
+        </div>
+        <div class="slider-row">
+          <span>底图浓度</span>
+          <input type="range" id="r-dim" min="0.08" max="1" step="0.02" value="1">
+          <b id="v-dim">100%</b>
+        </div>
+        <div class="slider-row">
+          <span>建筑高度夸张</span>
+          <input type="range" id="r-height" min="0.4" max="2.5" step="0.1" value="1">
+          <b id="v-height">1.0×</b>
+        </div>
+        <div class="slider-row">
+          <span>地块最小评分</span>
+          <input type="range" id="r-score" min="0" max="95" step="5" value="45">
+          <b id="v-score">45</b>
+        </div>
+        <div class="slider-row">
+          <span>地块规模上限</span>
+          <input type="range" id="r-area" min="2000" max="120000" step="2000" value="20000">
+          <b id="v-area">2 万㎡</b>
+        </div>
+      </section>
+
+      <section class="panel" id="stat-panel">
+        <div class="panel-h">当前视野统计</div>
+        <div id="stats" class="stats"></div>
+      </section>
+
+      <section class="panel credits">
+        <div class="panel-h">数据来源与口径</div>
+        <ul id="credits-list"></ul>
+      </section>
+    </aside>
+
+    <!-- 地图 -->
+    <div id="map">
+      <div id="cesiumContainer"></div>
+
+      <div id="hud">
+        <div class="hud-row"><span>相机高度</span><b id="hud-alt">—</b></div>
+        <div class="hud-row"><span>光标经纬度</span><b id="hud-ll">—</b></div>
+        <div class="hud-row"><span>光标到市中心</span><b id="hud-dist">—</b></div>
+      </div>
+
+      <div id="scalebar"><span id="scale-text">—</span></div>
+
+      <section class="panel" id="detail-panel">
+        <div class="panel-h">
+          <span>要素详情</span>
+          <button id="detail-close" class="mini-x" title="收起">×</button>
+        </div>
+        <div id="detail" class="detail empty">在地图上点击任意资源点或紫色地块</div>
+      </section>
+
+      <div id="loading">正在加载三维场景…</div>
+      <div id="netwarn" class="hidden">
+        地图引擎（Cesium CDN）未能加载。该页面需要联网访问 jsdelivr CDN 才能渲染三维底图。
+      </div>
+    </div>
+  </main>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/cesium@1.115.0/Build/Cesium/Cesium.js"></script>
+<script src="data/beiyuan.js?v=100"></script>
+<script src="js/crops.js?v=100"></script>
+<script src="js/app.js?v=100"></script>
+</body>
+</html>

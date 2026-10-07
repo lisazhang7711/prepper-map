@@ -10,7 +10,11 @@
 
   const D = window.BEIYUAN;
   const CATS = D.cats;
-  const CAT_ORDER = ["supermarket", "medical", "hotel", "carrepair", "fuel", "hardware", "farm"];
+  const CAT_ORDER = D.cat_order ||
+    ["supermarket", "medical", "hotel", "carrepair", "fuel", "hardware", "farm"];
+  /* 「可种地」这一类在新旧数据里键名不同，统一取 */
+  const PLOT_KEY = CATS.plot ? "plot" : "farm";
+  const PLOT_COLOR = (CATS[PLOT_KEY] || { color: "#8B5CF6" }).color;
   const DEG_M = 111320;
 
   const el = (id) => document.getElementById(id);
@@ -170,6 +174,13 @@
     const lo = (p.wx != null ? p.wx : p.x);
     return "N" + la.toFixed(5) + "  E" + lo.toFixed(5);
   }
+  /* 步行通达：路网实测 / 直线估算 */
+  function walkText(p) {
+    if (p.d == null) return "";
+    const d = p.d >= 1000 ? (p.d / 1000).toFixed(1) + "km" : p.d + "m";
+    const t = p.t != null ? Math.max(1, Math.round(p.t)) + "min" : "—";
+    return (p.dsrc === "route" ? "\u6b65\u884c" : "\u76f4\u7ebf") + " " + d + "/" + t;
+  }
 
   function roundRect(g, x, y, w, h, r) {
     g.beginPath();
@@ -181,12 +192,20 @@
     g.closePath();
   }
 
-  /* 高德风格 POI 卡片：左色块 + 名称 / 类别·楼层·楼号 / 经纬度 */
+  /* 断电状态配色 */
+  const PW_COLOR = { ok: "#16a34a", part: "#f59e0b", no: "#dc2626", na: "#94a3b8" };
+  const PW_TEXT = { ok: "断电可用", part: "断电受限", no: "断电失效", na: "避开" };
+
+  /* 高德风格 POI 卡片：左色块(外环=断电状态) + 名称 / 类别·断电·楼层 / 步行·坐标 */
   function makeCard(p, withCoord) {
     const col = CATS[p.c].color;
+    const pwCol = PW_COLOR[p.pw] || PW_COLOR.na;
     const l1 = (p.n && p.n !== "\u672a\u547d\u540d") ? p.n : CATS[p.c].zh + "\u70b9\u4f4d";
-    const l2 = CATS[p.c].zh + " · " + levelText(p) + (p.hn ? " · " + p.hn : " · " + "\u697c\u53f7\u672a\u6807\u6ce8");
-    const l3 = withCoord ? coordCouple(p) : "";
+    const l2 = CATS[p.c].zh + " · " + (PW_TEXT[p.pw] || "\u672a\u8bc4") + " · " + levelText(p);
+    const w3src = [];
+    if (p.d != null) w3src.push(walkText(p));
+    if (withCoord) w3src.push(coordCouple(p));
+    const l3 = w3src.join("　");
 
     const PADX = 11, PADY = 8, DOT = 22, GAP = 9, TIP = 8;
     const probe = document.createElement("canvas").getContext("2d");
@@ -221,6 +240,9 @@
     g.moveTo(W / 2 - 6, bodyH - 1); g.lineTo(W / 2, H); g.lineTo(W / 2 + 6, bodyH - 1);
     g.stroke();
 
+    /* 左色块：内圈=类别色，外环=断电状态色 */
+    g.beginPath(); g.arc(PADX + DOT / 2, PADY + DOT / 2, DOT / 2 + 3.2, 0, Math.PI * 2);
+    g.lineWidth = 3; g.strokeStyle = pwCol; g.stroke();
     g.beginPath(); g.arc(PADX + DOT / 2, PADY + DOT / 2, DOT / 2, 0, Math.PI * 2);
     g.fillStyle = col; g.fill();
     g.font = "600 15px 'Segoe UI Symbol','PingFang SC',sans-serif";
@@ -232,8 +254,21 @@
     g.textAlign = "left"; g.textBaseline = "alphabetic";
     g.font = FF(600, 15); g.fillStyle = "#111827";
     g.fillText(l1, tx, PADY + 14);
-    g.font = FF(400, 12.5); g.fillStyle = "#6b7280";
-    g.fillText(l2, tx, PADY + 14 + 16);
+    /* 第二行：「类别 · 断电可用 · 8层·估」——断电段用状态色 */
+    g.font = FF(400, 12.5);
+    const segs = l2.split(" · ");
+    let cx = tx;
+    segs.forEach((s, i) => {
+      g.fillStyle = i === 1 ? pwCol : "#6b7280";
+      g.font = FF(i === 1 ? 600 : 400, 12.5);
+      g.fillText(s, cx, PADY + 14 + 16);
+      cx += g.measureText(s).width;
+      if (i < segs.length - 1) {
+        g.font = FF(400, 12.5); g.fillStyle = "#c3c9d2";
+        g.fillText(" · ", cx, PADY + 14 + 16);
+        cx += g.measureText(" · ").width;
+      }
+    });
     if (l3) {
       g.font = FF(400, 11.5); g.fillStyle = "#9aa3b2";
       g.fillText(l3, tx, PADY + 14 + 16 + 15);
@@ -242,14 +277,18 @@
   }
 
   /* 远景：只剩一个小圆点 */
-  function makeDot(color, icon, dark) {
-    const S = 30, c = document.createElement("canvas");
+  function makeDot(color, icon, dark, pwCol) {
+    const S = 34, c = document.createElement("canvas");
     c.width = S * DPR; c.height = S * DPR;
     const g = c.getContext("2d");
     g.scale(DPR, DPR);
-    g.beginPath(); g.arc(S / 2, S / 2, 11, 0, Math.PI * 2);
-    g.lineWidth = 3.4; g.strokeStyle = "rgba(255,255,255,.98)"; g.stroke();
+    if (pwCol) {
+      g.beginPath(); g.arc(S / 2, S / 2, 13.2, 0, Math.PI * 2);
+      g.lineWidth = 3; g.strokeStyle = pwCol; g.stroke();
+    }
+    g.beginPath(); g.arc(S / 2, S / 2, 10.5, 0, Math.PI * 2);
     g.fillStyle = color; g.fill();
+    g.lineWidth = 2.6; g.strokeStyle = "rgba(255,255,255,.98)"; g.stroke();
     g.font = "600 12px 'Segoe UI Symbol','PingFang SC',sans-serif";
     g.fillStyle = dark ? "#334155" : "#ffffff";
     g.textAlign = "center"; g.textBaseline = "middle";
@@ -262,7 +301,8 @@
     CARD[p.i] = {
       near: makeCard(p, true),
       nearNo: makeCard(p, false),
-      dot: makeDot(CATS[p.c].color, CATS[p.c].icon, p.c === "hardware")
+      dot: makeDot(CATS[p.c].color, CATS[p.c].icon, p.c === "hardware",
+                   PW_COLOR[p.pw] || PW_COLOR.na)
     };
   });
 
@@ -352,6 +392,137 @@
   }
   addPOIs();
 
+  /* ==========================================================
+   * 撤离路网（主干道）+ 桥隧卡点（单点失效）
+   * ========================================================== */
+  const ROAD_WIDTH = { trunk: 7, primary: 5.5, secondary: 4, tertiary: 3 };
+  const roadEntities = [];
+  function addRoads() {
+    (D.roads || []).forEach((r) => {
+      const pts = [];
+      for (let i = 0; i < r.r.length; i += 2) pts.push(r.r[i], r.r[i + 1]);
+      if (pts.length < 4) return;
+      const ent = viewer.entities.add({
+        polyline: {
+          positions: Cesium.Cartesian3.fromDegreesArray(pts),
+          width: ROAD_WIDTH[r.cls] || 3,
+          clampToGround: true,
+          material: new Cesium.PolylineGlowMaterialProperty({
+            glowPower: 0.18,
+            color: Cesium.Color.fromCssColorString("#10B981").withAlpha(0.95)
+          })
+        }
+      });
+      props.set(ent, { kind: "road", data: r });
+      roadEntities.push(ent);
+    });
+  }
+  addRoads();
+
+  const chokeEntities = [];
+  function addChokes() {
+    (D.chokes || []).forEach((k) => {
+      const ent = viewer.entities.add({
+        position: Cesium.Cartesian3.fromDegrees(k.x, k.y, 6),
+        billboard: {
+          image: chokeIcon(k.k), width: 26, height: 26,
+          verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY
+        },
+        label: {
+          text: k.n,
+          font: "600 11px 'PingFang SC','Microsoft YaHei',sans-serif",
+          fillColor: Cesium.Color.fromCssColorString("#ffffff"),
+          outlineColor: Cesium.Color.fromCssColorString("#7f1d1d"),
+          outlineWidth: 3,
+          style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+          verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+          pixelOffset: new Cesium.Cartesian2(0, -28),
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 2600)
+        }
+      });
+      props.set(ent, { kind: "choke", data: k });
+      chokeEntities.push(ent);
+    });
+  }
+  function chokeIcon(kind) {
+    const S = 26, c = document.createElement("canvas");
+    c.width = S * DPR; c.height = S * DPR;
+    const g = c.getContext("2d");
+    g.scale(DPR, DPR);
+    g.beginPath();
+    g.moveTo(S / 2, 1.5); g.lineTo(S - 2, S - 6); g.lineTo(2, S - 6); g.closePath();
+    g.fillStyle = "#dc2626"; g.fill();
+    g.lineWidth = 2; g.strokeStyle = "#ffffff"; g.stroke();
+    g.fillStyle = "#ffffff";
+    g.font = "700 11px 'PingFang SC',sans-serif";
+    g.textAlign = "center"; g.textBaseline = "middle";
+    g.fillText(kind === "检查点" ? "！" : "△", S / 2, S / 2 + 3);
+    return c.toDataURL();
+  }
+  addChokes();
+
+  /* ==========================================================
+   * 低洼洪水区（河道两侧缓冲带）—— 属危险源，用于规划绕行
+   * ========================================================== */
+  const floodEntities = [];
+  function addFloods() {
+    (D.floods || []).forEach((f) => {
+      const pts = [];
+      for (let i = 0; i < f.r.length; i += 2) pts.push(f.r[i], f.r[i + 1]);
+      if (pts.length < 8) return;
+      let pos;
+      try { pos = Cesium.Cartesian3.fromDegreesArray(pts); } catch (e) { return; }
+      const ent = viewer.entities.add({
+        polygon: {
+          hierarchy: new Cesium.PolygonHierarchy(pos),
+          height: 1.2,
+          /* 贴地 polygon 不支持 outline（会渲染成黑色实块），只上色 */
+          material: Cesium.Color.fromCssColorString("#9333EA").withAlpha(0.28)
+        },
+        label: {
+          text: f.n + " · 低洼内涝带",
+          font: "600 11px 'PingFang SC','Microsoft YaHei',sans-serif",
+          fillColor: Cesium.Color.fromCssColorString("#581c87"),
+          outlineColor: Cesium.Color.WHITE,
+          outlineWidth: 3,
+          style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 2200)
+        }
+      });
+      props.set(ent, { kind: "flood", data: f });
+      floodEntities.push(ent);
+    });
+  }
+  addFloods();
+
+  /* ==========================================================
+   * 人群密度：建筑按估算人口着色（灾时最大变量是人群）
+   * ========================================================== */
+  function popColor(ph) {
+    // 人/公顷 → 绿→黄→橙→红
+    if (ph >= 900) return "#b91c1c";
+    if (ph >= 600) return "#ea580c";
+    if (ph >= 350) return "#f59e0b";
+    if (ph >= 150) return "#84cc16";
+    return "#22c55e";
+  }
+  function applyPeople(on) {
+    buildingEntities.forEach((ent) => {
+      const b = props.get(ent).data;
+      const eh = ent.polygon.extrudedHeight;
+      const col = on
+        ? Cesium.Color.fromCssColorString(popColor(b.ph || 0)).withAlpha(0.88)
+        : Cesium.Color.fromCssColorString(BUILD_COLOR[b.t] || BUILD_COLOR.yes).withAlpha(0.92);
+      const m = ent.polygon.material;
+      if (m && typeof m.setValue === "function") m.setValue(col);
+      else ent.polygon.material = col;
+      void eh;
+    });
+  }
+
   /* 卡片 / 圆点切换：由「信息卡」「经纬度」开关 + 相机距离决定 */
   function poiImage(ent, near) {
     if (!state.card || !near) return { img: ent.__card.dot.img, w: ent.__card.dot.w, h: ent.__card.dot.h, tip: 0 };
@@ -408,9 +579,9 @@
         polygon: {
           hierarchy: new Cesium.PolygonHierarchy(pos),
           height: 2.0,
-          material: Cesium.Color.fromCssColorString(CATS.farm.color).withAlpha(alpha),
+          material: Cesium.Color.fromCssColorString(PLOT_COLOR).withAlpha(alpha),
           outline: true,
-          outlineColor: Cesium.Color.fromCssColorString(CATS.farm.color).withAlpha(0.95),
+          outlineColor: Cesium.Color.fromCssColorString(PLOT_COLOR).withAlpha(0.95),
           outlineWidth: 2
         },
         position: Cesium.Cartesian3.fromDegrees(cx, cy, 2),
@@ -478,8 +649,18 @@
   }
 
   const CAT_DESC = {
+    water: "水厂泵站、水塔、井、河流湖泊（室外需净化）",
+    food: "超市货架 / 菜场 / 批发后仓 / 生鲜",
+    medical: "医院急诊、诊所、药店、AED",
+    energy: "变电站、加油站、通信塔、充电站",
+    egress: "撤离路网、汽修保障、桥隧单点",
+    hazard: "化工、监狱、油气储库——规划时绕行",
+    strong: "高层酒店据点 / 建材加固物资",
+    plot: "可种地（采光通风评分 + 作物产能）",
+    people: "出入口、地铁、学校——人群流动变量",
+    // 旧版兜底
     supermarket: "主食 / 罐头 / 瓶装水集中点",
-    medical: "医院、门诊、药房与急救耗材",
+    medical2: "医院、门诊、药房与急救耗材",
     hotel: "高层楼宇据点：出入口可控、结构可靠",
     carrepair: "工具、铅酸电池、耗材与零配件",
     fuel: "燃油补给；断电后不再可用",
@@ -490,16 +671,19 @@
   function refreshVisibility() {
     poiEntities.forEach((ent) => {
       const p = props.get(ent).data;
-      ent.show = !state.hidden.has(p.c);
+      const okCat = !state.hidden.has(p.c);
+      const okPw = !state.pwOnly || p.pw === "ok" || p.pw === "part";
+      ent.show = okCat && okPw;
     });
     plotEntities.forEach((ent) => {
       const p = props.get(ent).data;
-      const ok = (!state.hidden.has("farm")) &&
+      const ok = (!state.hidden.has(PLOT_KEY)) &&
                  p.s >= state.minScore &&
                  p.a <= state.maxArea &&
                  (!state.coreOnly || p.nb <= 200);
       ent.show = ok;
     });
+    floodEntities.forEach((ent) => (ent.show = !state.hidden.has("hazard")));
     document.querySelectorAll("#legend .lg").forEach((d) => {
       d.classList.toggle("off", state.hidden.has(d.dataset.cat));
     });
@@ -512,9 +696,19 @@
     poiEntities.forEach((e) => {
       if (!e.show) return;
       const p = props.get(e).data;
-      if (p.core) counts[p.c]++;
+      counts[p.c] = (counts[p.c] || 0) + 1;
     });
     state.visibleCount = counts;
+
+    /* 断电可用性统计 */
+    const pw = { ok: 0, part: 0, no: 0, na: 0 };
+    poiEntities.forEach((e) => {
+      const p = props.get(e).data;
+      if (state.hidden.has(p.c)) return;
+      pw[p.pw || "na"]++;
+    });
+    el("pw-count").textContent =
+      `可用 ${pw.ok} · 受限 ${pw.part} · 失效 ${pw.no}`;
 
     const visiblePlots = plotEntities.filter((e) => e.show);
     const area = visiblePlots.reduce((s, e) => s + props.get(e).data.a, 0);
@@ -524,7 +718,7 @@
     CAT_ORDER.forEach((k) => {
       html += `<div class="row"><i style="background:${CATS[k].color}"></i>${CATS[k].zh}<b>${counts[k]}</b></div>`;
     });
-    html += `<div class="row"><i style="background:${CATS.farm.color}"></i>候选种植地块<b>${visiblePlots.length}</b></div>`;
+    html += `<div class="row"><i style="background:${PLOT_COLOR}"></i>候选种植地块<b>${visiblePlots.length}</b></div>`;
     html += `<div class="row"><i style="background:#c9d2de"></i>建筑体块<b>${buildingEntities.length}</b></div>`;
     html += `<div class="note">可视地块合计 ${fmtArea(area)}，最高评分 ${top.toFixed(0)}。
               OSM 在城区的 POI 覆盖并不完整，加油站等类别已向北苑外围做半径扩展搜索。</div>`;
@@ -535,7 +729,7 @@
   /* ==========================================================
    * 详情面板
    * ========================================================== */
-  const SUB_ZH = {
+  const SUB_ZH = D.sub_zh || {
     hotel: "酒店宾馆", structure: "高层/综合体", care: "养老照护机构",
     tower: "写字楼 / 大厦", apartment: "公寓住宅",
     hospital: "医院", clinic: "门诊 / 卫生服务机构", pharma: "药房", vet: "宠物医疗",
@@ -543,10 +737,29 @@
     greenspace: "绿地 / 空地", seed: "农资 / 花卉 / 种子"
   };
 
+  /* 6 类要素的通用提醒（断电/垂直/人群三个易漏点） */
+  const CAT_NOTE = {
+    water: "断水通常先于断电发生。室外水源一律视为<b>需净化</b>：煮沸 3–5 分钟，或过滤＋含氯消毒片。",
+    food: "先清货架、后清后仓。货架库存 72 小时内会被抢空；后仓要破拆、人力转运不现实——优先级按步行距离排。",
+    medical: "断电后只有带柴油发电机的医院还能手术；普通药店可现金取药但冷藏失效。重伤只能送有发电机的医院。",
+    energy: "加油机油泵需电，断电站内取不出油；基站备电通常 4–8 小时后退服，通信窗口很短。",
+    egress: "单条路线遇桥断/设卡即作废，必须准备 ≥2 条不同方向的路线，并避开桥隧单点。",
+    hazard: "危险源用于规划时<b>绕行</b>：按上风向与爆炸半径留缓冲，撤离路线不要压在它旁边。",
+    strong: "高层酒店电梯停运后只能走楼梯，10 层以上运补困难；低层或裙房更适合做据点。",
+    plot: "种植属中长期方案：首年实际收成按测算值五折预估，且需水源与围栏配合。",
+    people: "灾时最大变量是<b>人群流动</b>，不是资源分布。密集出入口撤离时要避开，改走侧门/消防通道。"
+  };
+
+  const POI_BY_ID = {};
+  D.pois.forEach((p) => { POI_BY_ID[p.i] = p; });
+
   function renderDetail(kind, data) {
     const box = el("detail");
     if (kind === "plot") return renderPlot(box, data);
     if (kind === "building") return renderBuilding(box, data);
+    if (kind === "road") return renderRoad(box, data);
+    if (kind === "choke") return renderChoke(box, data);
+    if (kind === "flood") return renderFlood(box, data);
     return renderPOI(box, data);
   }
 
@@ -602,26 +815,60 @@
     };
   })();
 
+  /* ① 坐标 + 实际步行通达（不是直线距离） */
+  function accessRow(p) {
+    if (p.d == null) return "未测算";
+    const d = p.d >= 1000 ? (p.d / 1000).toFixed(2) + " km" : p.d + " m";
+    const t = p.t != null ? Math.max(1, Math.round(p.t)) + " 分钟" : "—";
+    const src = p.dsrc === "route"
+      ? "步行路网实测（OSRM）"
+      : "直线距离 ×1.35 估算（该点未取到路网）";
+    return `${d}　步行约 ${t}<br><span class="sub">${src}</span>`;
+  }
+
+  /* ④ 备用方案：同类第二近点，可点击跳转 */
+  function fbRow(p) {
+    const f = p.fb;
+    if (!f) return "本类无第二点位，需向外围扩展区找替代";
+    const d = f.d >= 1000 ? (f.d / 1000).toFixed(2) + " km" : f.d + " m";
+    const t = f.t != null ? Math.max(1, Math.round(f.t)) + " 分钟" : "—";
+    return `<a href="javascript:void(0)" class="fb-link" data-fb="${esc(f.i || f.n)}">${esc(f.n)}</a>
+      <br><span class="sub">${d}　步行约 ${t}</span>`;
+  }
+
   function renderPOI(box, p) {
     const c = CATS[p.c];
+    const pw = p.pw || "na";
     const rows = [];
-    rows.push(["类别", `${c.zh}${p.sub ? " · " + (SUB_ZH[p.sub] || p.sub) : ""}`]);
+
+    /* 五个必备字段，按顺序 ①—⑤ */
+    rows.push(["① 坐标 / 通达", accessRow(p)]);
+    rows.push(["② 断电后可用性",
+      `<span class="pwtag ${pw}">${PW_TEXT[pw] || "未评估"}</span><br><span class="sub">${esc(p.pwr || "未评估")}</span>`]);
+    rows.push(["③ 容量 / 存量", esc(p.cap || "未评估")]);
+    rows.push(["④ 备用方案", fbRow(p)]);
+    rows.push(["⑤ 最近核实",
+      `<b style="color:#b45309">${esc(p.vf || "—")}　未现场核实</b>
+       <br><span class="sub">OSM 快照日期，非实地踏勘；用前需现场确认</span>`]);
+
+    /* 垂直维度 */
     rows.push(["楼层", levelFull(p)]);
+    rows.push(["垂直维度", esc(p.vt || "无垂直信息")]);
     rows.push(["楼号 / 门牌", p.hn ? esc(p.hn) : "OSM 未标注（需现场核实）"]);
+    rows.push(["类别", `${c.zh}${p.sub ? " · " + (SUB_ZH[p.sub] || p.sub) : ""}`]);
     rows.push(...llRows(p));
-    if (p.bid) rows.push(["依托建筑", `OSM way ${p.bid}`]);
+
     const t = p.tags || {};
     if (t["opening_hours"]) rows.push(["营业时间", esc(t["opening_hours"])]);
     if (t.phone) rows.push(["电话", esc(t.phone)]);
-    if (t["addr:street"]) rows.push(["所在街道", esc(t["addr:street"])]);
-    rows.push(["区域", p.core ? "北苑核心区" : "外围扩展区"]);
 
-    let html = `<h3>${esc(p.n)}</h3><span class="badge" style="background:${c.color};
-      color:${p.c === "hardware" ? "#333" : "#fff"}">${c.zh}</span>
+    let html = `<h3>${esc(p.n)}</h3>
+      <span class="badge" style="background:${c.color};color:${p.c === "hardware" ? "#333" : "#fff"}">${c.zh}</span>
+      <span class="pwtag ${pw}" style="margin-left:5px">${PW_TEXT[pw] || "未评估"}</span>
       <table>${rows.map((r) => `<tr><td>${r[0]}</td><td>${r[1]}</td></tr>`).join("")}</table>`;
 
-    const adv = ADVICE[p.c] || "";
-    if (adv) html += `<div class="adv">${adv(p)}</div>`;
+    const note = CAT_NOTE[p.c];
+    if (note) html += `<div class="adv">${note}</div>`;
 
     const extra = Object.keys(t).filter((k) => k !== "name" && k !== "name:en");
     if (extra.length) {
@@ -629,6 +876,52 @@
     }
     box.className = "detail";
     box.innerHTML = html;
+    box.querySelectorAll(".fb-link").forEach((a) => {
+      a.addEventListener("click", () => {
+        const key = a.dataset.fb;
+        const target = POI_BY_ID[key] || D.pois.filter((o) => o.n === key)[0];
+        if (!target) return;
+        const ent = poiEntities.filter((e) => (props.get(e) || {}).data === target)[0];
+        if (ent) { flyToEntity(ent); renderPOI(box, target); }
+      });
+    });
+  }
+
+  function renderFlood(box, f) {
+    box.className = "detail";
+    box.innerHTML = `<h3>${esc(f.n)} · 低洼内涝带</h3>
+      <span class="badge" style="background:#9333EA">危险源</span>
+      <table>
+        <tr><td>类型</td><td>水体两侧各 45 m 的几何缓冲带（无高程数据时用它近似低洼区）</td></tr>
+        <tr><td>风险</td><td>暴雨内涝优先淹没，且断电后排水泵站失效会加重</td></tr>
+        <tr><td>用途</td><td>不在此设点位；撤离路线绕开，取水源时需评估上游污染</td></tr>
+      </table>
+      <div class="adv">这条带是<b>按几何推算</b>的，不是真实洪水淹没图。真实内涝要看高程与排水管网，现场核实前不要当依据。</div>`;
+  }
+
+  function renderRoad(box, r) {
+    const zh = { trunk: "快速路 / 国道", primary: "主干道", secondary: "次干道", tertiary: "支路" };
+    box.className = "detail";
+    box.innerHTML = `<h3>${esc(r.n)}</h3>
+      <span class="badge" style="background:#10B981">撤离路网</span>
+      <table>
+        <tr><td>道路等级</td><td>${zh[r.cls] || esc(r.cls)}</td></tr>
+        <tr><td>灾时通行</td><td>信号灯失效后通行能力按 3–5 折估算；主干道 72 小时内易被占满</td></tr>
+        <tr><td>单点失效</td><td>优先看本段是否压在桥隧上——见「桥隧·卡点」图层</td></tr>
+      </table>
+      <div class="adv">撤离至少准备 <b>2 条不同方向</b>的路线。本条只是候选之一，不要把它当唯一出口。</div>`;
+  }
+
+  function renderChoke(box, k) {
+    box.className = "detail";
+    box.innerHTML = `<h3>${esc(k.n)}</h3>
+      <span class="badge" style="background:#dc2626">${esc(k.k)}</span>
+      <table>
+        <tr><td>类型</td><td>${esc(k.k)}——典型<b>单点失效</b>位置</td></tr>
+        <tr><td>GCJ-02</td><td>${k.y.toFixed(6)}, ${k.x.toFixed(6)}</td></tr>
+        <tr><td>风险</td><td>一旦堵死/封闭，经过它的整条撤离路线作废</td></tr>
+      </table>
+      <div class="adv">凡经过本点的撤离路线，都必须再备一条不经过它的替代路线。</div>`;
   }
 
   function renderBuilding(box, b) {
@@ -643,12 +936,16 @@
         <tr><td>占地</td><td>${fmtArea(b.a)}</td></tr>
         <tr><td>高度</td><td>${b.h} m${b.e ? "（按类型估算，非实测）" : "（OSM 标注）"}</td></tr>
         <tr><td>楼号</td><td>${b.hn ? esc(b.hn) : "OSM 未标注"}</td></tr>
+        ${b.pop != null ? `<tr><td>估算人口</td><td>约 ${b.pop} 人（建筑面积×层数÷32㎡/人，粗估）</td></tr>` : ""}
+        ${b.ph != null ? `<tr><td>人口密度</td><td>${b.ph} 人/公顷　${b.ph >= 600 ? "<b style=\"color:#b91c1c\">高密度·撤离拥堵风险</b>" : b.ph >= 350 ? "中高密度" : "低密度"}</td></tr>` : ""}
+        ${b.lv ? `<tr><td>垂直维度</td><td>${b.lv >= 15 ? "≥15 层，按规范应设避难层（需现场确认）" : b.lv >= 8 ? "电梯停运后高层运补困难" : "多层，楼梯可达"}　屋顶约 ${Math.round(b.a)} ㎡可集雨</td></tr>` : ""}
         <tr><td>GCJ-02</td><td>${cy0.toFixed(6)}, ${cx0.toFixed(6)}</td></tr>
         ${wgs ? `<tr><td>WGS-84</td><td>N ${wgs[1].toFixed(6)}°　E ${wgs[0].toFixed(6)}°</td></tr>` : ""}
       </table>
       <div class="adv">${b.e
         ? "该楼 OSM 未提供层数标注，高度是按建筑类型与占地规模推算的量级参考，不要拿它去做工程判断。"
-        : "该楼高度取自 OSM 的 height / building:levels 标注。"}</div>`;
+        : "该楼高度取自 OSM 的 height / building:levels 标注。"}<br>
+        <b>灾时提醒：</b>这栋楼的人口是撤离时的主要负载——出入口宽度、楼梯通行能力才是瓶颈，不是道路。</div>`;
     box.className = "detail";
     box.innerHTML = html;
   }
@@ -667,7 +964,7 @@
       ["综合评分", `${p.s} / 100`]
     ];
     let html = `<h3>候选种植地块</h3>
-      <span class="badge" style="background:${CATS.farm.color}">可种植地</span>
+      <span class="badge" style="background:${PLOT_COLOR}">可种植地</span>
       <table>${rows.map((r) => `<tr><td>${r[0]}</td><td>${r[1]}</td></tr>`).join("")}</table>
       <div class="adv warn">${p.g ? "" : "这块地在 OSM 里没有绿地/农田标注，只是「未建筑、非道路」的连片空地。" +
         "实际可能是荒地、苗圃、停车场或已开工工地，落地前必须现场确认权属与用途。"}</div>`;
@@ -813,7 +1110,9 @@
     let radius = 420;
     if (o.kind === "poi") radius = 300;
     else if (o.kind === "plot") radius = Math.max(260, Math.sqrt(o.data.a) * 2.2);
-    else radius = Math.max(320, Math.sqrt(o.data.a) * 2.6);
+    else if (o.kind === "road") radius = 900;
+    else if (o.kind === "choke") radius = 420;
+    else radius = Math.max(320, Math.sqrt(o.data.a || 4000) * 2.6);
     viewer.flyTo(ent, {
       offset: new Cesium.HeadingPitchRange(
         viewer.camera.heading, Cesium.Math.toRadians(-42), radius),
@@ -892,6 +1191,20 @@
   el("tg-build").addEventListener("change", (e) => {
     state.buildings = e.target.checked;
     buildingEntities.forEach((ent) => (ent.show = e.target.checked));
+  });
+  el("tg-roads").addEventListener("change", (e) => {
+    roadEntities.forEach((ent) => (ent.show = e.target.checked));
+  });
+  el("tg-choke").addEventListener("change", (e) => {
+    chokeEntities.forEach((ent) => (ent.show = e.target.checked));
+  });
+  el("tg-people").addEventListener("change", (e) => {
+    state.people = e.target.checked;
+    applyPeople(e.target.checked);
+  });
+  el("tg-pw").addEventListener("change", (e) => {
+    state.pwOnly = e.target.checked;
+    refreshVisibility();
   });
   el("tg-label").addEventListener("change", (e) => {
     state.card = e.target.checked;
@@ -989,24 +1302,34 @@
   });
 
   /* ---------------- 数据来源说明 ---------------- */
+  const nRoute = D.pois.filter((p) => p.dsrc === "route").length;
+  const nOk = D.pois.filter((p) => p.pw === "ok" || p.pw === "part").length;
+
   el("credits-list").innerHTML = [
-    `<b>底图</b>：© OpenStreetMap contributors / Esri World Imagery（公网静态版，未使用高德瓦片）；三维楼块为 OSM 数据自建。`,
-    `<b>建筑轮廓、道路、POI</b>：OpenStreetMap contributors，经 Overpass API 抓取，ODbL 1.0；已整体从 WGS84 转为 GCJ-02 以对齐高德底图。`,
-    `<b>建筑高度</b>：${D.buildings.filter((b) => b.e === 0).length} 栋取自 OSM 标注，其余按建筑类型与占地规模估算，仅供视觉参考。`,
-    `<b>可种植地块</b>：在 ${(D.meta.bbox[2] - D.meta.bbox[0]).toFixed(3)}° × ${(D.meta.bbox[3] - D.meta.bbox[1]).toFixed(3)}° 窗口内做 20 m 栅格化，
-     剔除建筑占地、道路及其缓冲后做连通聚类，再按周边建筑的遮挡角算采光与通风评分。<b>这是几何推算，不是土地性质认定。</b>`,
-    `<b>OSM 城区 POI 覆盖不完整</b>：加油站、汽修、建材等类别已在北苑外围做扩展搜索补充，外围点位在面板中标注。<b>任何一次实地决策前都要现场核实。</b>`,
-    `<b>图层分工</b>：灰白底图 + 米白楼块都是背景，<b>只有带色描边的卡片和紫色地块是本图自己标记的结论</b>；
-     底图默认 100%＝高德原色原文字不处理；需要时勾「淡化底图」再拖滑块（只降透明度、保留颜色与文字）。`,
-    `<b>卡片上的三行</b>：名称 ／ 类别·楼层·楼号 ／ 经纬度。
-     楼层优先取 OSM 的 building:levels，缺失时按建筑高度 ÷3.1 m 估算（标「·估」）；
-     楼号取 addr:housenumber 或楼栋标注 ${D.pois.filter((p) => p.hn).length}/${D.pois.length} 个点位有，其余是 OSM 未标注住宅门牌，需现场核实；
-     经纬度默认给 WGS-84（GPS 原始值），详情面板里并列给出 GCJ-02（高德口径）。`,
-    `<b>作物产能</b>：华北露天条件下的常用单产中值，属测算参考值；首年实际收成按五折预估更现实。`
+    `<b>本图按「最低可用配置」组织</b>：6 类要素齐全（水／食物／医疗／能源通信／撤离路线／危险源），
+     每个点位带 5 个字段：① 坐标+步行通达　② 断电后可用性　③ 容量存量　④ 备用方案　⑤ 核实时间。`,
+    `<b>① 坐标与通达</b>：${nRoute}/${D.pois.length} 个点位的步行距离与用时来自 OSRM 步行路网实测
+     （<b>不是直线距离</b>），其余为直线×1.35 估算，面板里标「直线」以示区别。`,
+    `<b>② 断电后可用性</b>：这是按类别判定的<b>推断值，不是实测</b>。加油站油泵、超市 POS、电梯、
+     门禁断电即失效——图标画上去不等于能用。勾「只看断电后仍可用」，${nOk}/${D.pois.length} 个点位会留下。`,
+    `<b>③④ 容量与备用</b>：容量是量级粗估，用于排序而非精确计划；备用方案自动给同类第二近点，
+     详情面板里点名字可直接跳过去。`,
+    `<b>⑤ 核实时间</b>：全部为 ${D.meta.generated || "OSM 快照"}，<b>无一经过实地踏勘</b>。
+     地图会过期，没有时间戳的图不可信——做任何实地决策前必须现场核实。`,
+    `<b>垂直维度</b>：楼层、屋顶可集雨面积、地下停车空间已进详情面板；≥8 层标注电梯停运后的运补困难，
+     ≥15 层提示可能有避难层（需现场确认）。平面路况好不等于高层能用。`,
+    `<b>人本身</b>：勾「人群密度着色」按估算人口给建筑上色；小区出入口、地铁、学校单列一类。
+     灾时最大的变量是人群流动，不是资源分布——撤离瓶颈常在出入口与楼梯。`,
+    `<b>底图与数据</b>：底图 © 高德（本机版）／OSM·Esri（公网版）；建筑轮廓、道路、POI 来自
+     OpenStreetMap contributors（Overpass API，ODbL 1.0），已整体从 WGS-84 转为 GCJ-02 对齐高德底图。`,
+    `<b>已知缺口</b>：OSM 在城区的 POI 与门牌覆盖不完整（楼号仅 ${D.pois.filter((p) => p.hn).length}/${D.pois.length} 个点位有），
+     水厂泵站、AED、低洼洪水区等类别是<b>几何推算或类别推断</b>，不是实测。这不是一张可执行的图，是一张待现场核实的底稿。`
   ].map((s) => `<li>${s}</li>`).join("");
 
   el("brand-sub").textContent =
-    `DEMO — ${D.meta.area} · ${D.buildings.length} 栋建筑 / ${D.pois.length} 个资源点 / ${D.plots.length} 块候选地块`;
+    `DEMO — ${D.meta.area || "北苑片区"} · ${D.pois.length} 个资源点 / ` +
+    `${(D.roads || []).length} 条撤离道路 / ${(D.chokes || []).length} 个桥隧卡点 / ` +
+    `${D.buildings.length} 栋建筑`;
 
   /* ---------------- 启动 ---------------- */
   if (location.protocol === "file:") {

@@ -4,9 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>北苑生存资源三维图 · 公网静态版</title>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cesium@1.115.0/Build/Cesium/Widgets/widgets.css">
+<link rel="stylesheet" href="cesium/Widgets/widgets.css">
 <link rel="stylesheet" href="css/app.css?v=100">
-<script>window.CESIUM_BASE_URL = 'https://cdn.jsdelivr.net/npm/cesium@1.115.0/Build/Cesium/';</script>
+<script>window.CESIUM_BASE_URL = 'cesium/';</script>
 </head>
 <body>
 
@@ -64,10 +64,30 @@
       </section>
 
       <section class="panel">
+        <div class="panel-h">
+          <span>断电可用性筛选</span>
+          <span class="hint" id="pw-count">—</span>
+        </div>
+        <div class="toggles">
+          <label class="tg"><input type="checkbox" id="tg-pw"><span><b class="pw-dot ok"></b>只看断电后仍可用</span></label>
+        </div>
+        <div class="pw-legend">
+          <div><b class="pw-dot ok"></b>ok　断电照常使用</div>
+          <div><b class="pw-dot part"></b>part　部分可用 / 有时限</div>
+          <div><b class="pw-dot no"></b>no　断电即失效</div>
+          <div><b class="pw-dot na"></b>na　危险源 / 不适用</div>
+        </div>
+        <p class="note">勾上后，卡片只留 ok + part 两类——这一刀通常砍掉一半点位。</p>
+      </section>
+
+      <section class="panel">
         <div class="panel-h">显示项</div>
         <div class="toggles">
           <label class="tg"><input type="checkbox" id="tg-dim"><span>淡化底图（默认关闭·保持原色）</span></label>
           <label class="tg"><input type="checkbox" id="tg-build" checked><span>建筑体块</span></label>
+          <label class="tg"><input type="checkbox" id="tg-roads" checked><span>撤离路网（主干道）</span></label>
+          <label class="tg"><input type="checkbox" id="tg-choke" checked><span>桥隧·卡点（单点失效）</span></label>
+          <label class="tg"><input type="checkbox" id="tg-people"><span>人群密度着色（按人口）</span></label>
           <label class="tg"><input type="checkbox" id="tg-leader" checked><span>资源点引线</span></label>
           <label class="tg"><input type="checkbox" id="tg-label" checked><span>资源点信息卡</span></label>
           <label class="tg"><input type="checkbox" id="tg-coord" checked><span>卡片显示经纬度</span></label>
@@ -113,7 +133,7 @@
       <div id="hud">
         <div class="hud-row"><span>相机高度</span><b id="hud-alt">—</b></div>
         <div class="hud-row"><span>光标经纬度</span><b id="hud-ll">—</b></div>
-        <div class="hud-row"><span>光标到市中心</span><b id="hud-dist">—</b></div>
+        <div class="hud-row"><span>光标到基地</span><b id="hud-dist">—</b></div>
       </div>
 
       <div id="scalebar"><span id="scale-text">—</span></div>
@@ -128,13 +148,19 @@
 
       <div id="loading">正在加载三维场景…</div>
       <div id="netwarn" class="hidden">
-        地图引擎（Cesium CDN）未能加载。该页面需要联网访问 jsdelivr CDN 才能渲染三维底图。
+        地图引擎（Cesium）未能加载。三维引擎已随项目本地化（cesium/ 目录），出现这个提示通常是文件不完整或浏览器缓存异常——刷新一次试试。
       </div>
     </div>
   </main>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/cesium@1.115.0/Build/Cesium/Cesium.js"></script>
+<script>
+window.__err = [];
+window.addEventListener("error", function (e) {
+  window.__err.push((e.message || "") + " @ " + (e.filename || "").split("/").pop() + ":" + e.lineno);
+});
+</script>
+<script src="cesium/Cesium.js"></script>
 <script src="data/beiyuan.js?v=100"></script>
 <script src="js/crops.js?v=100"></script>
 <script src="js/app.js?v=100"></script>

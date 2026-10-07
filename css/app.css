@@ -107,6 +107,31 @@ html, body {
 .lg .t2 { font-size: 11px; color: var(--ink-3); margin-top: 1px; }
 .lg .ct { font-size: 11px; color: var(--ink-2); font-variant-numeric: tabular-nums; margin-top: 4px; flex: 0 0 auto; }
 
+/* 断电可用性 */
+.pw-legend {
+  display: grid; grid-template-columns: 1fr; gap: 3px;
+  padding: 0 12px 8px; font-size: 11.5px; color: var(--ink-3);
+}
+.pw-dot {
+  display: inline-block; width: 9px; height: 9px; border-radius: 50%;
+  margin-right: 5px; vertical-align: -1px; border: 1px solid rgba(0,0,0,.14);
+}
+.pw-dot.ok   { background: #16a34a; }
+.pw-dot.part { background: #f59e0b; }
+.pw-dot.no   { background: #dc2626; }
+.pw-dot.na   { background: #94a3b8; }
+.panel .note { padding: 0 12px 10px; font-size: 11px; color: var(--ink-3); line-height: 1.5; }
+
+/* 详情面板里的状态徽标 */
+.pwtag {
+  display: inline-block; padding: 1px 7px; border-radius: 4px;
+  font-size: 11px; font-weight: 650; color: #fff; letter-spacing: .3px;
+}
+.pwtag.ok { background: #16a34a; }
+.pwtag.part { background: #f59e0b; }
+.pwtag.no { background: #dc2626; }
+.pwtag.na { background: #94a3b8; }
+
 /* 开关 / 滑块 */
 .toggles { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 10px; padding: 10px 12px; }
 .tg { display: flex; align-items: center; gap: 6px; font-size: 12.5px; cursor: pointer; color: var(--ink-2); }

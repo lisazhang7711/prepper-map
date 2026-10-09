@@ -1373,6 +1373,9 @@
     const nDead = D.pois.filter((p) => p._v === "dead").length;
     const nb = document.getElementById("n-stale");
     if (nb) nb.textContent = nDead;
+    // 双方都已查无的点位清理完毕后，这个开关没有意义，直接隐藏
+    const wrap = document.getElementById("tg-stale-wrap");
+    if (wrap) wrap.style.display = nDead ? "" : "none";
     tgStale.checked = state.hideStale;
     tgStale.addEventListener("change", (e) => {
       state.hideStale = e.target.checked;

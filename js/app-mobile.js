@@ -363,6 +363,7 @@
   if (staleBtn) {
     const nDead = D.pois.filter((p) => p._v === "dead").length;
     staleBtn.title = "隐藏疑似已关闭（" + nDead + " 个）";
+    staleBtn.style.display = nDead ? "" : "none";   // 没有已关闭点位时隐藏这个按钮
     staleBtn.classList.toggle("on", hideStale);
     staleBtn.addEventListener("click", () => {
       hideStale = !hideStale;

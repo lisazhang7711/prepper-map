@@ -6,7 +6,7 @@
 - 手机版：全屏二维地图 + 底部抽屉，点位默认只显示单字图标，不遮地图
 - 电脑版：左侧完整控制面板（图层 / 断电可用性 / 候选地块 / 统计）
 - 底图：高德地图 JS API（GCJ-02），需要联网 + 一个 Web 端（JS API）Key
-- 数据：OpenStreetMap contributors（Overpass API，ODbL 1.0），共 158 个资源点 / 357 栋建筑 / 82 条道路 / 45 个桥隧卡点 / 84 块候选地块
+- 数据：OpenStreetMap contributors（Overpass API，ODbL 1.0），共 146 个资源点 / 357 栋建筑 / 82 条道路 / 45 个桥隧卡点 / 84 块候选地块
 - 坐标：数据文件存的就是 GCJ-02，与高德底图一致，无需换算
 - 步行距离：OSRM 步行路网实测（routing.openstreetmap.de），取不到时退回「直线×1.35」并在界面标注「直线」
 - 点位默认折叠：只显示一枚单字彩色图标，点击才展开该点详情

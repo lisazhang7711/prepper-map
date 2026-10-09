@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>北苑生存资源地图 · 手机版</title>
+<link rel="stylesheet" href="css/app-mobile.css?v=201">
+</head>
+<body>
+
+<div id="map"></div>
+
+<!-- 顶部：搜索 + 类别筛选 -->
+<header id="m-top">
+  <div class="m-search">
+    <span class="m-sicon">🔍</span>
+    <input id="m-search" placeholder="搜索资源点，例如 加油站" autocomplete="off">
+    <button id="m-clear" class="m-clr" hidden>✕</button>
+  </div>
+  <div id="m-chips" class="m-chips"></div>
+  <div id="m-hits" class="m-hits" hidden></div>
+</header>
+
+<!-- 右下浮动按钮 -->
+<div id="m-fabs">
+  <button id="m-locate" class="m-fab" title="回到中心">◎</button>
+  <button id="m-tilt" class="m-fab" title="立体/平面">3D</button>
+  <button id="m-build" class="m-fab" title="建筑轮廓">▤</button>
+</div>
+
+<!-- 底部抽屉 -->
+<div id="m-sheet" class="m-sheet collapsed">
+  <div id="m-handle" class="m-handle">
+    <span class="m-bar"></span>
+    <span id="m-hint">点击地图上的图标查看详情</span>
+    <button id="m-switch" class="m-mini">切换版本</button>
+  </div>
+  <div id="m-body" class="m-body">
+    <div id="m-legend" class="m-legend"></div>
+    <div id="m-detail" class="m-detail" hidden></div>
+  </div>
+</div>
+
+<div id="m-loading" class="m-loading">正在加载地图…</div>
+
+<script>
+window.__err = [];
+window.addEventListener("error", function (e) {
+  window.__err.push((e.message || "") + " @ " + (e.filename || "").split("/").pop() + ":" + e.lineno);
+});
+window._AMapSecurityConfig = { securityJsCode: "571524729ab76ad1aea1f9db16f4dd47" };
+window.AMAP_KEY = (function () {
+  try { return ((localStorage.getItem("amap_key") || "").trim() || "8b8ababff9835479479c636f1724e878"); }
+  catch (e) { return "8b8ababff9835479479c636f1724e878"; }
+})();
+if (window.AMAP_KEY && window.AMAP_KEY.slice(0, 2) !== "__") {
+  document.write('<script src="https://webapi.amap.com/maps?v=2.0&key='
+    + encodeURIComponent(window.AMAP_KEY) + '"><\/script>');
+}
+</script>
+<script src="data/beiyuan.js?v=201"></script>
+<script src="js/app-mobile.js?v=201"></script>
+</body>
+</html>

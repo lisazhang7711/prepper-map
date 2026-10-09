@@ -1294,7 +1294,12 @@
     el("detail-panel").classList.toggle("collapsed");
     el("detail-close").textContent = el("detail-panel").classList.contains("collapsed") ? "▾" : "×";
   });
-  el("btn-reset").addEventListener("click", () => setView("tilt"));
+  el("btn-reset").addEventListener("click", () => setView("top"));
+  const sw = document.getElementById("btn-switch");
+  if (sw) sw.addEventListener("click", () => {
+    try { localStorage.removeItem("pm_device"); } catch (e) {}
+    location.href = "index.html";
+  });
   el("viewmode").addEventListener("change", (e) => setView(e.target.value));
 
   /* ---------------- 视角 ---------------- */
@@ -1384,8 +1389,8 @@
   applyMouseSens(state.sens);
   buildLegend();
   refreshVisibility();
-  setView("tilt");
-  el("viewmode").value = "tilt";
+  setView("top");            // 默认二维正射，跟手机/苹果地图一致
+  el("viewmode").value = "top";
   updateHud();
   el("loading").classList.add("hidden");
 })();

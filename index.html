@@ -3,14 +3,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>北苑生存资源三维图 · 公网静态版</title>
-<link rel="stylesheet" href="cesium/Widgets/widgets.css">
-<link rel="stylesheet" href="css/app.css?v=101">
-<script>window.CESIUM_BASE_URL = 'cesium/';</script>
+<title>北苑生存资源地图 · 公网静态版</title>
+<link rel="stylesheet" href="css/app.css?v=201">
 </head>
 <body>
 
-<div id="file-warning" style="display:none">你是用「双击文件」的方式打开本页的，浏览器会拦掉地图瓦片（跨域限制），地图会空白。请改用任意静态服务器访问本目录，例如在本目录执行 <b>python -m http.server 8000</b>，再打开 http://localhost:8000（或直接用 GitHub Pages 的在线地址）。</div>
+<div id="file-warning" style="display:none">你是用「双击文件」的方式打开本页的。地图需要联网加载高德 JS API，且 file:// 协议下部分浏览器会拦掉它——建议用任意静态服务器访问本目录，例如在本目录执行 <b>python -m http.server 8000</b>，再打开 http://localhost:8000。也可以直接用 GitHub Pages 的在线地址。</div>
 <div id="wrap">
 
   <!-- ============ 顶栏 ============ -->
@@ -18,9 +16,9 @@
     <div class="brand">
       <span class="dot"></span>
       <div>
-        <h1>北苑片区 · 生存资源三维地图</h1>
+        <h1>北苑片区 · 生存资源地图</h1>
         <p id="brand-sub">DEMO — 建筑与 POI 来自 OpenStreetMap 真实数据</p>
-        <span id="netmode-badge" class="badge direct">直连模式</span>
+        <span id="netmode-badge" class="badge direct">高德 JS API</span>
       </div>
     </div>
 
@@ -28,14 +26,15 @@
       <label class="sel">
         底图
         <select id="basemap">
-          <option value="osm">OSM 标准图（默认）</option>
-          <option value="esri">Esri 卫星影像</option>
+          <option value="amap">高德 · 标准图</option>
+          <option value="amap_pure">高德 · 纯路网</option>
+          <option value="amap_sat">高德 · 卫星影像</option>
         </select>
       </label>
       <label class="sel">
         视角
         <select id="viewmode">
-          <option value="street">低空贴地</option>
+          <option value="street">街区贴近</option>
           <option value="tilt">倾斜俯瞰</option>
           <option value="top">正射俯视</option>
           <option value="district">周边地区概览</option>
@@ -45,6 +44,7 @@
         <input id="search" placeholder="搜索资源点，例如 加油站 / 酒店" autocomplete="off">
         <div id="search-list"></div>
       </div>
+      <button id="btn-key" class="btn ghost">配置 Key</button>
       <button id="btn-reset" class="btn ghost">重置视角</button>
     </div>
   </header>
@@ -83,13 +83,13 @@
       <section class="panel">
         <div class="panel-h">显示项</div>
         <div class="toggles">
-          <label class="tg"><input type="checkbox" id="tg-dim"><span>淡化底图（默认关闭·保持原色）</span></label>
-          <label class="tg"><input type="checkbox" id="tg-build" checked><span>建筑体块</span></label>
+          <label class="tg"><input type="checkbox" id="tg-fold" checked><span>点位默认折叠（只显示类别图标）</span></label>
+          <label class="tg"><input type="checkbox" id="tg-dim"><span>淡化底图（默认关闭·保持高德原色）</span></label>
+          <label class="tg"><input type="checkbox" id="tg-build" checked><span>建筑轮廓</span></label>
           <label class="tg"><input type="checkbox" id="tg-roads" checked><span>撤离路网（主干道）</span></label>
           <label class="tg"><input type="checkbox" id="tg-choke" checked><span>桥隧·卡点（单点失效）</span></label>
           <label class="tg"><input type="checkbox" id="tg-people"><span>人群密度着色（按人口）</span></label>
-          <label class="tg"><input type="checkbox" id="tg-leader" checked><span>资源点引线</span></label>
-          <label class="tg"><input type="checkbox" id="tg-label" checked><span>资源点信息卡</span></label>
+          <label class="tg"><input type="checkbox" id="tg-label" checked><span>点开后显示信息卡</span></label>
           <label class="tg"><input type="checkbox" id="tg-coord" checked><span>卡片显示经纬度</span></label>
           <label class="tg"><input type="checkbox" id="tg-core" checked><span>只看宅边地块（离建筑 50 m 内）</span></label>
         </div>
@@ -99,10 +99,16 @@
           <b id="v-dim">100%</b>
         </div>
         <div class="slider-row">
-          <span>建筑高度夸张</span>
-          <input type="range" id="r-height" min="0.4" max="2.5" step="0.1" value="1">
-          <b id="v-height">1.0×</b>
+          <span>鼠标灵敏度</span>
+          <input type="range" id="r-sens" min="15" max="120" step="5" value="35">
+          <b id="v-sens">35%</b>
         </div>
+        <div class="btn-row">
+          <button id="btn-fold-all" class="btn ghost">全部收起</button>
+          <button id="btn-unfold-all" class="btn ghost">全部展开</button>
+        </div>
+        <p class="note">默认每个点位只显示一枚<b>单字彩色图标</b>（水／食／医／电／撤／危／住／种／人），
+          不显示名称与详情；点一下才展开该点的信息卡，再点一下收起。与缩放级别无关。</p>
         <div class="slider-row">
           <span>地块最小评分</span>
           <input type="range" id="r-score" min="0" max="95" step="5" value="45">
@@ -128,10 +134,10 @@
 
     <!-- 地图 -->
     <div id="map">
-      <div id="cesiumContainer"></div>
+      <div id="amapContainer"></div>
 
       <div id="hud">
-        <div class="hud-row"><span>相机高度</span><b id="hud-alt">—</b></div>
+        <div class="hud-row"><span>缩放级别</span><b id="hud-alt">—</b></div>
         <div class="hud-row"><span>光标经纬度</span><b id="hud-ll">—</b></div>
         <div class="hud-row"><span>光标到基地</span><b id="hud-dist">—</b></div>
       </div>
@@ -146,9 +152,23 @@
         <div id="detail" class="detail empty">在地图上点击任意资源点或紫色地块</div>
       </section>
 
-      <div id="loading">正在加载三维场景…</div>
+      <div id="loading">正在加载地图…</div>
+
       <div id="netwarn" class="hidden">
-        地图引擎（Cesium）未能加载。三维引擎已随项目本地化（cesium/ 目录），出现这个提示通常是文件不完整或浏览器缓存异常——刷新一次试试。
+        地图引擎未能加载。本页依赖<b>高德地图 JS API</b>：需要联网，且必须配置一个 Web 端（JS API）Key。
+        点右上角「配置 Key」填入即可，Key 只保存在本机浏览器里。
+      </div>
+
+      <div id="keypanel" class="hidden">
+        <div class="kp-box">
+          <b>配置高德 Key</b>
+          <p>需要高德开放平台的 <b>Web 端（JS API）</b> Key。填入后保存在本机 localStorage，不会上传。</p>
+          <input id="key-input" placeholder="粘贴 JS API Key" autocomplete="off">
+          <div class="kp-row">
+            <button id="key-save" class="btn">保存并重载</button>
+            <button id="key-cancel" class="btn ghost">取消</button>
+          </div>
+        </div>
       </div>
     </div>
   </main>
@@ -159,10 +179,19 @@ window.__err = [];
 window.addEventListener("error", function (e) {
   window.__err.push((e.message || "") + " @ " + (e.filename || "").split("/").pop() + ":" + e.lineno);
 });
+/* 高德 JS API：安全密钥与 Key（Key 会出现在前端，建议在高德后台配置域名白名单） */
+window._AMapSecurityConfig = { securityJsCode: "571524729ab76ad1aea1f9db16f4dd47" };
+window.AMAP_KEY = (function () {
+  try { return ((localStorage.getItem("amap_key") || "").trim() || "8b8ababff9835479479c636f1724e878"); }
+  catch (e) { return "8b8ababff9835479479c636f1724e878"; }
+})();
+if (window.AMAP_KEY && window.AMAP_KEY.slice(0, 2) !== "__") {
+  document.write('<script src="https://webapi.amap.com/maps?v=2.0&key='
+    + encodeURIComponent(window.AMAP_KEY) + '"><\/script>');
+}
 </script>
-<script src="cesium/Cesium.js"></script>
-<script src="data/beiyuan.js?v=101"></script>
-<script src="js/crops.js?v=101"></script>
-<script src="js/app.js?v=101"></script>
+<script src="data/beiyuan.js?v=201"></script>
+<script src="js/crops.js?v=201"></script>
+<script src="js/app.js?v=201"></script>
 </body>
 </html>

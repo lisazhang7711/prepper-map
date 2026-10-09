@@ -79,6 +79,8 @@ html, body {
 
 #side {
   flex: 0 0 var(--side-w); width: var(--side-w); overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
   background: var(--bg); border-right: 1px solid var(--line); padding: 12px;
   display: flex; flex-direction: column; gap: 12px;
 }
@@ -205,7 +207,8 @@ html, body {
 
 /* ---------------- 地图 ---------------- */
 #map { flex: 1 1 auto; position: relative; min-width: 0; }
-#cesiumContainer { position: absolute; inset: 0; }
+#amapContainer { position: absolute; inset: 0; }
+#amapContainer .amap-logo, #amapContainer .amap-copyright { opacity:.55; }
 .cesium-widget-credits { font-size: 10px !important; opacity: .65; }
 
 #hud {
@@ -258,3 +261,31 @@ html, body {
   border-radius: 999px; vertical-align: middle;
 }
 .badge.proxy { --bg: #e6f4ee; --fg: #12764f; --bd: #b9e2cf; }
+
+/* Key 配置面板 */
+#keypanel { position:absolute; inset:0; z-index:60; background:rgba(15,23,42,.35);
+  display:flex; align-items:center; justify-content:center; }
+#keypanel .kp-box { background:#fff; border-radius:12px; padding:18px 20px; width:340px;
+  box-shadow:0 12px 34px rgba(15,23,42,.28); }
+#keypanel .kp-box b { font-size:14px; }
+#keypanel .kp-box p { font-size:12px; color:var(--ink-2,#5b6472); line-height:1.6; margin:6px 0 10px; }
+#keypanel .kp-box input { width:100%; box-sizing:border-box; padding:7px 9px; font-size:13px;
+  border:1px solid var(--line,#dfe3e9); border-radius:7px; }
+#keypanel .kp-row { display:flex; gap:8px; margin-top:10px; }
+#keypanel .kp-row .btn { flex:1 1 0; }
+
+/* 折叠：全部展开 / 全部收起 按钮行 */
+.btn-row { display: flex; gap: 8px; margin: 8px 0 2px; }
+.btn-row .btn { flex: 1 1 0; padding: 5px 0; font-size: 12px; text-align: center; }
+
+/* 折叠大头针的详情列表 */
+.cl-list { margin: 8px 0 4px; }
+.cl-item {
+  display: flex; align-items: baseline; gap: 7px;
+  padding: 6px 7px; border-radius: 7px; cursor: pointer;
+  border: 1px solid transparent;
+}
+.cl-item:hover { background: #f4f6f9; border-color: var(--line); }
+.cl-item i { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; transform: translateY(-1px); }
+.cl-item .cl-n { flex: 1 1 auto; font-size: 12.5px; font-weight: 600; color: var(--ink); }
+.cl-item .cl-d { flex: 0 0 auto; font-size: 11px; color: var(--ink-2); font-variant-numeric: tabular-nums; }

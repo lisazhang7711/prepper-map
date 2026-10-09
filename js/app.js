@@ -2,9 +2,36 @@
 (function () {
   "use strict";
 
-  if (typeof Cesium === "undefined" || typeof window.BEIYUAN === "undefined") {
+  /* 没有 Key / 加载不到高德 JS API 时，给一个能自己填 Key 的入口 */
+  function bindKeyPanel() {
+    const panel = document.getElementById("keypanel");
+    const input = document.getElementById("key-input");
+    const save = document.getElementById("key-save");
+    const cancel = document.getElementById("key-cancel");
+    if (!panel) return;
+    if (cancel) cancel.addEventListener("click", () => panel.classList.add("hidden"));
+    if (save && input) {
+      const doSave = () => {
+        const v = (input.value || "").trim();
+        if (!v) { input.focus(); return; }
+        try { localStorage.setItem("amap_key", v); } catch (e) {}
+        location.reload();
+      };
+      save.addEventListener("click", doSave);
+      input.addEventListener("keydown", (e) => { if (e.key === "Enter") doSave(); });
+    }
+  }
+
+  if (typeof window.BEIYUAN === "undefined") {
     document.getElementById("loading").classList.add("hidden");
     document.getElementById("netwarn").classList.remove("hidden");
+    return;
+  }
+  if (typeof AMap === "undefined" || !AMap.Map) {
+    document.getElementById("loading").classList.add("hidden");
+    document.getElementById("netwarn").classList.remove("hidden");
+    document.getElementById("keypanel").classList.remove("hidden");
+    bindKeyPanel();
     return;
   }
 
@@ -20,248 +47,134 @@
 
   /* ==========================================================
    * 坐标基准
-   * 数据里的 x,y 是 GCJ-02（与高德对齐）；OSM / Esri 瓦片是 WGS-84。
-   * 两者相差约 550 m，不换算的话整张图（点、楼、路、地块）都会偏出去。
-   * 这里按当前底图的基准自动选择：高德系底图用 GCJ-02，其余用 WGS-84。
+   * 底图是高德（GCJ-02），数据本身也是 GCJ-02 —— 两者一致，不需要任何换算。
    * ========================================================== */
-  const gcj2wgs = (function () {
-    const A = 6378245.0, EE = 0.00669342162296594323;
-    function tl(x, y) {
-      let r = 300.0 + x + 2.0 * y + 0.1 * x * x + 0.1 * x * y + 0.1 * Math.sqrt(Math.abs(x));
-      r += (20.0 * Math.sin(6.0 * x * Math.PI) + 20.0 * Math.sin(2.0 * x * Math.PI)) * 2 / 3;
-      r += (20.0 * Math.sin(x * Math.PI) + 40.0 * Math.sin(x / 3.0 * Math.PI)) * 2 / 3;
-      r += (150.0 * Math.sin(x / 12.0 * Math.PI) + 300.0 * Math.sin(x / 30.0 * Math.PI)) * 2 / 3;
-      return r;
-    }
-    function tt(x, y) {
-      let r = -100.0 + 2.0 * x + 3.0 * y + 0.2 * y * y + 0.1 * x * y + 0.2 * Math.sqrt(Math.abs(x));
-      r += (20.0 * Math.sin(6.0 * x * Math.PI) + 20.0 * Math.sin(2.0 * x * Math.PI)) * 2 / 3;
-      r += (20.0 * Math.sin(y * Math.PI) + 40.0 * Math.sin(y / 3.0 * Math.PI)) * 2 / 3;
-      r += (160.0 * Math.sin(y / 12.0 * Math.PI) + 320.0 * Math.sin(y * Math.PI / 30.0)) * 2 / 3;
-      return r;
-    }
-    function gcjOf(lon, lat) {
-      const dx = tl(lon - 105.0, lat - 35.0), dy = tt(lon - 105.0, lat - 35.0);
-      const rad = lat / 180.0 * Math.PI;
-      const magic = 1 - EE * Math.sin(rad) * Math.sin(rad);
-      const sq = Math.sqrt(magic);
-      const dlat = (dy * 180.0) / ((A * (1 - EE)) / (magic * sq) * Math.PI);
-      const dlon = (dx * 180.0) / (A / sq * Math.cos(rad) * Math.PI);
-      return [lon + dlon, lat + dlat];
-    }
-    return function (lon, lat) {
-      let wx = lon, wy = lat;
-      for (let i = 0; i < 3; i++) {
-        const g = gcjOf(wx, wy);
-        wx += lon - g[0];
-        wy += lat - g[1];
-      }
-      return [wx, wy];
-    };
-  })();
-  window.__gcj2wgs = gcj2wgs;
+  function llOf(p) { return [p.x, p.y]; }
+  function ringOf(r) { return r; }
 
-  /* 高德系瓦片本身就是 GCJ-02，其余（OSM / Esri）是 WGS-84 */
-  const GCJ_BASEMAPS = ["amap", "amap_pure", "amap_sat"];
-  let useWgs = false;          // 当前是否按 WGS-84 出图
-  let geometryReady = false;   // 几何是否已建好（建好之后切底图才需要重算）
-
-  /* 单个点位 -> [lon, lat]（有 wx/wy 就直接用，缺失再反解） */
-  function llOf(p) {
-    if (!useWgs) return [p.x, p.y];
-    if (p.wx != null && p.wy != null) return [p.wx, p.wy];
-    return gcj2wgs(p.x, p.y);
-  }
-  /* 扁平环 [x,y,x,y,…] -> [lon,lat,…] */
-  function ringOf(r) {
-    if (!useWgs) return r;
-    const out = new Array(r.length);
-    for (let i = 0; i < r.length; i += 2) {
-      const w = gcj2wgs(r[i], r[i + 1]);
-      out[i] = w[0]; out[i + 1] = w[1];
-    }
-    return out;
-  }
-  /* 基地（HUD「光标到基地」的参照点），数据里是 GCJ-02 */
+  /* 基地（HUD「光标到基地」的参照点） */
   const BASE_GCJ = (function () {
     const b = D.meta && D.meta.base, c = D.meta && D.meta.center;
     const v = (b && b.length === 2) ? b : ((c && c.length === 2) ? c : null);
     return v ? [v[0], v[1]] : [116.4272486, 40.0334017];
   })();
-  function baseLL() {
-    return useWgs ? gcj2wgs(BASE_GCJ[0], BASE_GCJ[1]) : BASE_GCJ;
-  }
+  function baseLL() { return BASE_GCJ; }
 
   const el = (id) => document.getElementById(id);
-  const $ = (s) => document.querySelector(s);
 
   const state = {
     hidden: new Set(),
-    heightScale: 1,
     minScore: 45,
     maxArea: 20000,
     coreOnly: true,
-    showLabels: true,
-    showLeaders: true,
+    fold: true,        // 点位默认折叠：只显示单字类别图标，点开才展开信息卡
+    card: true,        // 展开时用信息卡（关掉则只开右侧详情面板）
+    coord: true,       // 信息卡是否带经纬度
+    pwOnly: false,
+    dim: false,
+    dimAlpha: 1,
+    sens: 0.35,        // 鼠标灵敏度倍率（1 = 原始手感）
     selectedCrop: "sweetpotato",
     selectedPlot: null,
     visibleCount: {}
   };
 
-  const props = new WeakMap();   // Cesium.Entity -> 业务数据
+  const props = new WeakMap();   // 地图要素对象 -> 业务数据
 
   /* ==========================================================
-   * 场景初始化
+   * 地图初始化（高德 JS API）
    * ========================================================== */
-  const creditBox = document.createElement("div");
-  creditBox.style.cssText = "position:absolute;right:110px;bottom:6px;z-index:9;" +
-    "font-size:10px;color:#5b6472;opacity:.75;pointer-events:auto;max-width:52%;text-align:right;";
-  el("map").appendChild(creditBox);
+  const CENTER = {
+    lon: (D.meta.center && D.meta.center[0]) || 116.4272,
+    lat: (D.meta.center && D.meta.center[1]) || 40.0334
+  };
 
-  const viewer = new Cesium.Viewer("cesiumContainer", {
-    baseLayer: false,
-    terrainProvider: new Cesium.EllipsoidTerrainProvider(),
-    animation: false, timeline: false, fullscreenButton: false, homeButton: false,
-    navigationHelpButton: false, sceneModePicker: false, geocoder: false,
-    baseLayerPicker: false, infoBox: false, selectionIndicator: false,
-    creditContainer: creditBox,
-    skyBox: false,            // 不要黑色星空
-    skyAtmosphere: false,     // 不要地平线大气晕
-    requestRenderMode: false
+  const mapEl = el("amapContainer");
+  const map = new AMap.Map("amapContainer", {
+    viewMode: "3D",
+    zoom: 16,
+    center: [CENTER.lon, CENTER.lat],
+    pitch: 0,
+    rotation: 0,
+    showLabel: true,
+    mapStyle: "amap://styles/normal",
+    features: ["bg", "road", "point", "building"],
+    resizeEnable: true,
+    dragEnable: true,
+    jogEnable: false,
+    animateEnable: true,
+    zoomEnable: false,          // 滚轮缩放交给下面的灵敏度逻辑
+    doubleClickZoom: false,
+    keyboardEnable: false
   });
+  window.__map = map;
 
-  window.__viewer = viewer;      // 调试用
-  const scene = viewer.scene;
-  scene.screenSpaceCameraController.enableCollisionDetection = false;
-  // ---- 纯白「高德风」背景：任何没有影像覆盖的地方都是白纸，不会发黑 ----
-  scene.backgroundColor = Cesium.Color.fromCssColorString("#f2f2f0");
-  scene.globe.baseColor = Cesium.Color.fromCssColorString("#ffffff");
-  scene.globe.showGroundAtmosphere = false;
-  scene.globe.enableLighting = false;
-  scene.globe.depthTestAgainstTerrain = false;
-  scene.globe.atmosphereBrightnessShift = 0;
-  scene.fog.enabled = false;
-  scene.highDynamicRange = false;
-  scene.debugShowFramesPerSecond = false;
-  if (scene.skyAtmosphere) scene.skyAtmosphere.show = false;
-  if (scene.sun) scene.sun.show = false;
-  if (scene.moon) scene.moon.show = false;
+  /* ---------------- 鼠标灵敏度 ----------------
+   * 内置滚轮缩放关掉，自己按滑块节流：灵敏度越低，需要滚越多才升降一级。
+   * 平移由高德自带（1:1 跟手，不存在三维相机「一甩就飞」的问题）。 */
+  let wheelAcc = 0, wheelStep = 320;
+  function applyMouseSens(s) {
+    wheelStep = 110 / Math.max(0.15, s);   // 触发一级缩放所需的 deltaY 累计量
+  }
+  function zoomBy(dir) {
+    const z = map.getZoom();
+    map.setZoom(Math.min(20, Math.max(3, Math.round((z + dir * 0.5) * 2) / 2)));
+  }
+  mapEl.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    wheelAcc += e.deltaY;
+    if (Math.abs(wheelAcc) < wheelStep) return;
+    const dir = wheelAcc > 0 ? -1 : 1;
+    wheelAcc = 0;
+    zoomBy(dir);
+  }, { passive: false, capture: true });
+  map.on("dblclick", () => zoomBy(2));
 
   /* ---------------- 底图 ---------------- */
-  const GD_SUB = ["1", "2", "3", "4"];
-
-  // 直连（默认，任何静态服务器都能用，但会受浏览器跨域/防盗链影响）
-  const DIRECT_URL = {
-    osm:       "https://tile.openstreetmap.de/{z}/{x}/{y}.png",
-    osm_main:  "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
-    esri:      "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
-  };
-  // 走 server.py 的同源代理（无跨域限制 + 磁盘缓存 + 可离线）
-  const PROXY_URL = {
-    amap:      "/tiles/amap/{z}/{x}/{y}",
-    amap_pure: "/tiles/amap_pure/{z}/{x}/{y}",
-    amap_sat:  "/tiles/amap_sat/{z}/{x}/{y}",
-    osm:       "/tiles/osm/{z}/{x}/{y}",
-    esri:      "/tiles/esri/{z}/{x}/{y}"
-  };
-
-  const BASEMAPS = {
-    osm:       { subdomains: [""],   max: 19, credit: "\u00a9 OpenStreetMap contributors" },
-    esri:      { subdomains: [""],   max: 19, credit: "Esri World Imagery" }
-  };
-
-  // "direct" 还是 "proxy"，启动时探测 /health 决定
-  let netMode = "direct";
+  let satLayer = null, roadNetLayer = null;
+  function clearBasemapLayers() {
+    if (satLayer) { map.remove(satLayer); satLayer = null; }
+    if (roadNetLayer) { map.remove(roadNetLayer); roadNetLayer = null; }
+  }
+  function setBasemap(key) {
+    clearBasemapLayers();
+    if (key === "amap_sat") {
+      try {
+        satLayer = new AMap.TileLayer.Satellite();
+        roadNetLayer = new AMap.TileLayer.RoadNet();
+        map.add([satLayer, roadNetLayer]);
+        map.setMapStyle("amap://styles/normal");
+      } catch (e) {
+        console.warn("[basemap] 卫星图层不可用，回退标准图", e);
+        map.setMapStyle("amap://styles/normal");
+      }
+    } else if (key === "amap_pure") {
+      map.setMapStyle("amap://styles/whitesmoke");   // 远山白：路网为主，几乎无底色
+    } else {
+      map.setMapStyle("amap://styles/normal");
+    }
+    applyDim();
+  }
 
   /* ---- 底图淡化（默认关闭：保持高德原色、原文字） ----
-   * 用户需要时再开：只调透明度 + 轻度提亮，不动饱和度，文字与颜色尽量保真。 */
-  state.dim = false;
-  state.dimAlpha = 1.0;
+   * 只压底图本身（CSS filter + 半透明），不动覆盖物。 */
   function applyDim() {
-    if (!baseLayer) return;
+    if (!mapEl) return;
     if (state.dim) {
       const a = state.dimAlpha;
-      baseLayer.alpha = a;
-      baseLayer.saturation = 0.85 + 0.15 * a;   // 保留原色，只轻微收敛
-      baseLayer.brightness = 1.18 - 0.18 * a;
-      baseLayer.contrast = 0.94 + 0.06 * a;
-      baseLayer.gamma = 1.0;
+      mapEl.style.filter =
+        "saturate(" + (0.85 + 0.15 * a).toFixed(2) + ") brightness(" +
+        (1.18 - 0.18 * a).toFixed(2) + ") contrast(" + (0.94 + 0.06 * a).toFixed(2) + ")";
+      mapEl.style.opacity = String(a);
     } else {
-      baseLayer.alpha = 1;
-      baseLayer.saturation = 1;
-      baseLayer.brightness = 1;
-      baseLayer.contrast = 1;
-      baseLayer.gamma = 1;
-    }
-    scene.requestRender();
-  }
-
-  let baseLayer = null;
-
-  /* 瓦片降级：OSM 社区镜像被限流时切到官方源，再不行由 Cesium 显示底色 */
-  let osmMirror = false;
-  let tileErr = 0;
-  function onTileError() {
-    if (++tileErr < 6) return;
-    tileErr = 0;
-    const key = currentBasemap();
-    if (key === "osm" && !osmMirror) {
-      osmMirror = true;
-      console.warn("[basemap] OSM 镜像连续失败，切到官方瓦片源");
-      setBasemap("osm");
+      mapEl.style.filter = "none";
+      mapEl.style.opacity = "1";
     }
   }
-  function tileUrl(key, fallbackUrl) {
-    if (netMode === "proxy") return PROXY_URL[key] || fallbackUrl;
-    if (key === "osm") return osmMirror ? DIRECT_URL.osm_main : DIRECT_URL.osm;
-    return DIRECT_URL[key] || fallbackUrl;
-  }
-
-  function setBasemap(key) {
-    const cfg = BASEMAPS[key] || BASEMAPS.osm;
-    const wgs = GCJ_BASEMAPS.indexOf(key) < 0;
-    const datumChanged = wgs !== useWgs;
-    useWgs = wgs;
-    const url = tileUrl(key, DIRECT_URL.osm);
-    if (baseLayer) scene.imageryLayers.remove(baseLayer, true);
-    try {
-      const provider = new Cesium.UrlTemplateImageryProvider({
-        url: url,
-        subdomains: netMode === "proxy" ? [""] : (cfg.subdomains || [""]),
-        maximumLevel: cfg.max,
-        credit: new Cesium.Credit(cfg.credit, false)
-      });
-      if (provider.errorEvent) provider.errorEvent.addEventListener(onTileError);
-      baseLayer = scene.imageryLayers.addImageryProvider(provider, 0);
-      applyDim();
-    } catch (e) {
-      console.warn("底图切换失败", e);
-    }
-    /* 底图坐标系变了，矢量要素要整体换算一次，否则又会偏 550 m */
-    if (datumChanged && geometryReady) updateGeometry();
-  }
-
-  const currentBasemap = () => el("basemap").value || "osm";
-  setBasemap("osm");
-  el("basemap").value = "osm";
+  el("basemap").value = "amap";
   el("basemap").addEventListener("change", (e) => setBasemap(e.target.value));
-
-  // 探测本机 server.py：存在就切同源代理模式
-  (async () => {
-    return; // 静态版：无本地代理服务
-    if (location.protocol === "file:") return;
-    try {
-      const r = await fetch("/health", { cache: "no-store" });
-      if (!r.ok) return;
-      const j = await r.json();
-      if (j && j.proxy) {
-        netMode = "proxy";
-        setBasemap(currentBasemap());
-        const badge = el("netmode-badge");
-        if (badge) { badge.textContent = "\u672c\u5730\u4ee3\u7406\u00b7\u53ef\u79bb\u7ebf"; badge.className = "badge proxy"; }
-      }
-    } catch (_) { /* 没有代理服务，保持直连 */ }
-  })();
+  setBasemap("amap");
 
   /* ==========================================================
    * 图标
@@ -410,7 +323,7 @@
   });
 
   /* ==========================================================
-   * 建筑体块
+   * 建筑轮廓（OSM footprint，半透明叠在高德底图之上）
    * ========================================================== */
   const BUILD_COLOR = {
     residential: "#e6e3dc", apartments: "#e6e3dc", house: "#eae7e0",
@@ -423,77 +336,133 @@
     D.buildings.forEach((b) => {
       const ring = ringOf(b.r);
       if (ring.length < 8) return;
-      let pos;
-      try {
-        pos = Cesium.Cartesian3.fromDegreesArray(ring);
-      } catch (e) { return; }
-      const col = Cesium.Color.fromCssColorString(BUILD_COLOR[b.t] || BUILD_COLOR.yes)
-        .withAlpha(0.92);
-      const ent = viewer.entities.add({
-        polygon: {
-          hierarchy: new Cesium.PolygonHierarchy(pos),
-          extrudedHeight: b.h * state.heightScale,
-          material: col,
-          outline: true,
-          outlineColor: Cesium.Color.fromCssColorString("#a8a49b").withAlpha(0.75),
-          outlineWidth: 1.2,
-          perPositionHeight: false
-        }
+      const path = [];
+      for (let i = 0; i < ring.length; i += 2) path.push([ring[i], ring[i + 1]]);
+      const base = BUILD_COLOR[b.t] || BUILD_COLOR.yes;
+      const poly = new AMap.Polygon({
+        path: path,
+        fillColor: base,
+        fillOpacity: 0.42,
+        strokeColor: "#a8a49b",
+        strokeWeight: 1,
+        strokeOpacity: 0.8,
+        zIndex: 20,
+        cursor: "pointer"
       });
-      ent.__baseHeight = b.h;
-      props.set(ent, { kind: "building", data: b });
-      buildingEntities.push(ent);
+      poly.__baseColor = base;
+      props.set(poly, { kind: "building", data: b });
+      poly.on("click", () => renderDetail("building", b));
+      buildingEntities.push(poly);
+      poly.setMap(map);
     });
   }
   addBuildings();
 
-  function applyHeightScale() {
-    buildingEntities.forEach((ent) => {
-      const v = ent.__baseHeight * state.heightScale;
-      const eh = ent.polygon.extrudedHeight;
-      if (eh && typeof eh.setValue === "function") eh.setValue(v);
-      else ent.polygon.extrudedHeight = v;
-    });
-  }
-
   /* ==========================================================
    * 资源点（POI）
+   *   默认：每个点只显示一枚「单字彩色图标」（水／食／医／电／撤／危／住／种／人）
+   *   点一下：该点展开成信息卡 + 右侧详情面板；再点一下收起
+   *   与缩放级别无关——没点开就永远只有那一枚图标
    * ========================================================== */
   const poiEntities = [];
-  state.card = true;      // 是否显示信息卡
-  state.coord = true;     // 卡片是否带经纬度
-  const NEAR_M = 1500;    // 距离阈值：近→卡片，远→圆点
+  const poiEntById = new Map();      // poi id -> marker
+  const expandedIds = new Set();     // 已展开的点位 id
+
+  /* 折叠开关关掉 = 全部直接铺开信息卡 */
+  function isExpanded(m) { return !state.fold || expandedIds.has(m.__pid); }
+
+  function poiImage(m) {
+    const c = m.__card;
+    if (isExpanded(m) && state.card) {
+      const k = state.coord ? c.near : c.nearNo;
+      return { img: k.img, w: k.w, h: k.h, card: true };
+    }
+    return { img: c.dot.img, w: c.dot.w, h: c.dot.h, card: false };
+  }
+  function applyPoiIcon(m) {
+    const s = poiImage(m);
+    m.setIcon(new AMap.Icon({
+      image: s.img,
+      size: new AMap.Size(s.w, s.h),
+      imageSize: new AMap.Size(s.w, s.h)
+    }));
+    /* 圆点以中心对准点位；信息卡底部有个小尖，以尖端对准 */
+    m.setOffset(s.card ? new AMap.Pixel(-s.w / 2, -s.h + 1)
+                       : new AMap.Pixel(-s.w / 2, -s.h / 2));
+    m.setzIndex(s.card ? 220 : 120);
+  }
 
   function addPOIs() {
     D.pois.forEach((p) => {
-      const card = CARD[p.i];
-      const top = 46;
       const c = llOf(p);
-      const groundPos = Cesium.Cartesian3.fromDegrees(c[0], c[1], 0);
-      const midPos = Cesium.Cartesian3.fromDegrees(c[0], c[1], top);
-
-      const ent = viewer.entities.add({
-        position: midPos,
-        billboard: {
-          image: card.dot.img, width: card.dot.w, height: card.dot.h,
-          verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
-          horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
-          heightReference: Cesium.HeightReference.NONE,
-          disableDepthTestDistance: Number.POSITIVE_INFINITY
-        },
-        polyline: {
-          positions: [groundPos, midPos],
-          width: 2.2,
-          material: new Cesium.ColorMaterialProperty(
-            Cesium.Color.fromCssColorString(CATS[p.c].color).withAlpha(0.95))
-        }
+      const card = CARD[p.i];
+      const m = new AMap.Marker({
+        position: [c[0], c[1]],
+        icon: new AMap.Icon({
+          image: card.dot.img,
+          size: new AMap.Size(card.dot.w, card.dot.h),
+          imageSize: new AMap.Size(card.dot.w, card.dot.h)
+        }),
+        offset: new AMap.Pixel(-card.dot.w / 2, -card.dot.h / 2),
+        zIndex: 120,
+        cursor: "pointer",
+        title: p.n
       });
-      ent.__card = card;
-      props.set(ent, { kind: "poi", data: p });
-      poiEntities.push(ent);
+      m.__card = card;
+      m.__pid = p.i;
+      m.__cat = p.c;
+      m.__baseShow = true;
+      props.set(m, { kind: "poi", data: p });
+      m.on("click", () => onPoiClick(m));
+      poiEntities.push(m);
+      poiEntById.set(p.i, m);
+      m.setMap(map);
     });
   }
   addPOIs();
+
+  let currentPoiId = null;
+  function onPoiClick(m) {
+    const p = props.get(m).data;
+    const open = expandedIds.has(p.i);
+    if (open) expandedIds.delete(p.i);
+    else { expandedIds.add(p.i); state.fold = true; }
+    applyPoiIcon(m);
+    if (!open) {
+      currentPoiId = p.i;
+      renderDetail("poi", p);
+      /* 只在目标不在视野里时居中，避免每点一下地图就跳 */
+      try {
+        if (!map.getBounds().contains(new AMap.LngLat(p.x, p.y))) map.setCenter([p.x, p.y]);
+      } catch (e) { /* 边界接口拿不到就算了 */ }
+    } else if (currentPoiId === p.i) {
+      currentPoiId = null;
+      const box = el("detail");
+      box.className = "detail empty";
+      box.textContent = "在地图上点击任意资源点或紫色地块";
+    }
+    updateStats();
+  }
+
+  /* 展开某个点位（搜索跳转、备用方案跳转时用） */
+  function unfoldPoi(id) {
+    expandedIds.add(id);
+    const m = poiEntById.get(id);
+    if (m) applyPoiIcon(m);
+    return true;
+  }
+  function collapseAll() {
+    expandedIds.clear();
+    refreshPOIStyle();
+  }
+  function expandAll() {
+    poiEntities.forEach((m) => { if (m.__baseShow !== false) expandedIds.add(m.__pid); });
+    refreshPOIStyle();
+  }
+  function refreshPOIStyle() {
+    poiEntities.forEach((m) => applyPoiIcon(m));
+    updateStats();
+  }
 
   /* ==========================================================
    * 撤离路网（主干道）+ 桥隧卡点（单点失效）
@@ -504,19 +473,21 @@
     (D.roads || []).forEach((r) => {
       const pts = ringOf(r.r);
       if (pts.length < 4) return;
-      const ent = viewer.entities.add({
-        polyline: {
-          positions: Cesium.Cartesian3.fromDegreesArray(pts),
-          width: ROAD_WIDTH[r.cls] || 3,
-          clampToGround: true,
-          material: new Cesium.PolylineGlowMaterialProperty({
-            glowPower: 0.18,
-            color: Cesium.Color.fromCssColorString("#10B981").withAlpha(0.95)
-          })
-        }
+      const path = [];
+      for (let i = 0; i < pts.length; i += 2) path.push([pts[i], pts[i + 1]]);
+      const line = new AMap.Polyline({
+        path: path,
+        strokeColor: "#10B981",
+        strokeWeight: ROAD_WIDTH[r.cls] || 3,
+        strokeOpacity: 0.95,
+        lineJoin: "round",
+        zIndex: 40,
+        cursor: "pointer"
       });
-      props.set(ent, { kind: "road", data: r });
-      roadEntities.push(ent);
+      props.set(line, { kind: "road", data: r });
+      line.on("click", () => renderDetail("road", r));
+      roadEntities.push(line);
+      line.setMap(map);
     });
   }
   addRoads();
@@ -525,28 +496,38 @@
   function addChokes() {
     (D.chokes || []).forEach((k) => {
       const c = llOf(k);
-      const ent = viewer.entities.add({
-        position: Cesium.Cartesian3.fromDegrees(c[0], c[1], 6),
-        billboard: {
-          image: chokeIcon(k.k), width: 26, height: 26,
-          verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
-          disableDepthTestDistance: Number.POSITIVE_INFINITY
-        },
-        label: {
-          text: k.n,
-          font: "600 11px 'PingFang SC','Microsoft YaHei',sans-serif",
-          fillColor: Cesium.Color.fromCssColorString("#ffffff"),
-          outlineColor: Cesium.Color.fromCssColorString("#7f1d1d"),
-          outlineWidth: 3,
-          style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-          verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
-          pixelOffset: new Cesium.Cartesian2(0, -28),
-          disableDepthTestDistance: Number.POSITIVE_INFINITY,
-          distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 2600)
+      const mk = new AMap.Marker({
+        position: [c[0], c[1]],
+        icon: new AMap.Icon({
+          image: chokeIcon(k.k),
+          size: new AMap.Size(26, 26),
+          imageSize: new AMap.Size(26, 26)
+        }),
+        offset: new AMap.Pixel(-13, -26),
+        zIndex: 150,
+        cursor: "pointer"
+      });
+      props.set(mk, { kind: "choke", data: k });
+      mk.on("click", () => renderDetail("choke", k));
+      chokeEntities.push(mk);
+      mk.setMap(map);
+
+      const tx = new AMap.Text({
+        text: k.n,
+        position: [c[0], c[1]],
+        anchor: "bottom-center",
+        offset: new AMap.Pixel(0, -28),
+        zIndex: 151,
+        style: {
+          "font-size": "11px", "font-weight": "600", color: "#ffffff",
+          "background-color": "transparent", border: "none", padding: "0",
+          "text-shadow": "-1px -1px 0 #7f1d1d, 1px -1px 0 #7f1d1d, -1px 1px 0 #7f1d1d, 1px 1px 0 #7f1d1d"
         }
       });
-      props.set(ent, { kind: "choke", data: k });
-      chokeEntities.push(ent);
+      props.set(tx, { kind: "choke", data: k });
+      tx.on("click", () => renderDetail("choke", k));
+      chokeEntities.push(tx);
+      tx.setMap(map);
     });
   }
   function chokeIcon(kind) {
@@ -561,7 +542,7 @@
     g.fillStyle = "#ffffff";
     g.font = "700 11px 'PingFang SC',sans-serif";
     g.textAlign = "center"; g.textBaseline = "middle";
-    g.fillText(kind === "检查点" ? "！" : "△", S / 2, S / 2 + 3);
+    g.fillText(kind === "\u68c0\u67e5\u70b9" ? "！" : "△", S / 2, S / 2 + 3);
     return c.toDataURL();
   }
   addChokes();
@@ -570,32 +551,51 @@
    * 低洼洪水区（河道两侧缓冲带）—— 属危险源，用于规划绕行
    * ========================================================== */
   const floodEntities = [];
+  function ringPath(ring) {
+    const path = [];
+    let sx = 0, sy = 0, n = 0;
+    for (let i = 0; i < ring.length; i += 2) {
+      path.push([ring[i], ring[i + 1]]);
+      sx += ring[i]; sy += ring[i + 1]; n++;
+    }
+    return { path: path, center: n ? [sx / n, sy / n] : null };
+  }
   function addFloods() {
     (D.floods || []).forEach((f) => {
-      const pts = ringOf(f.r);
-      if (pts.length < 8) return;
-      let pos;
-      try { pos = Cesium.Cartesian3.fromDegreesArray(pts); } catch (e) { return; }
-      const ent = viewer.entities.add({
-        polygon: {
-          hierarchy: new Cesium.PolygonHierarchy(pos),
-          height: 1.2,
-          /* 贴地 polygon 不支持 outline（会渲染成黑色实块），只上色 */
-          material: Cesium.Color.fromCssColorString("#9333EA").withAlpha(0.28)
-        },
-        label: {
-          text: f.n + " · 低洼内涝带",
-          font: "600 11px 'PingFang SC','Microsoft YaHei',sans-serif",
-          fillColor: Cesium.Color.fromCssColorString("#581c87"),
-          outlineColor: Cesium.Color.WHITE,
-          outlineWidth: 3,
-          style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-          disableDepthTestDistance: Number.POSITIVE_INFINITY,
-          distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 2200)
-        }
+      const g = ringPath(ringOf(f.r));
+      if (g.path.length < 4) return;
+      const poly = new AMap.Polygon({
+        path: g.path,
+        fillColor: "#9333EA",
+        fillOpacity: 0.28,
+        strokeColor: "#9333EA",
+        strokeWeight: 1,
+        strokeOpacity: 0.65,
+        zIndex: 30,
+        cursor: "pointer"
       });
-      props.set(ent, { kind: "flood", data: f });
-      floodEntities.push(ent);
+      props.set(poly, { kind: "flood", data: f });
+      poly.on("click", () => renderDetail("flood", f));
+      floodEntities.push(poly);
+      poly.setMap(map);
+
+      if (g.center) {
+        const tx = new AMap.Text({
+          text: f.n + " · 低洼内涝带",
+          position: g.center,
+          anchor: "center",
+          zIndex: 31,
+          style: {
+            "font-size": "11px", "font-weight": "600", color: "#581c87",
+            "background-color": "rgba(255,255,255,.82)", "border-radius": "4px",
+            border: "none", padding: "1px 5px"
+          }
+        });
+        props.set(tx, { kind: "flood", data: f });
+        tx.on("click", () => renderDetail("flood", f));
+        floodEntities.push(tx);
+        tx.setMap(map);
+      }
     });
   }
   addFloods();
@@ -612,53 +612,14 @@
     return "#22c55e";
   }
   function applyPeople(on) {
-    buildingEntities.forEach((ent) => {
-      const b = props.get(ent).data;
-      const eh = ent.polygon.extrudedHeight;
-      const col = on
-        ? Cesium.Color.fromCssColorString(popColor(b.ph || 0)).withAlpha(0.88)
-        : Cesium.Color.fromCssColorString(BUILD_COLOR[b.t] || BUILD_COLOR.yes).withAlpha(0.92);
-      const m = ent.polygon.material;
-      if (m && typeof m.setValue === "function") m.setValue(col);
-      else ent.polygon.material = col;
-      void eh;
+    buildingEntities.forEach((poly) => {
+      const b = props.get(poly).data;
+      poly.setOptions({
+        fillColor: on ? popColor(b.ph || 0) : (poly.__baseColor || BUILD_COLOR.yes),
+        fillOpacity: on ? 0.62 : 0.42
+      });
     });
   }
-
-  /* 卡片 / 圆点切换：由「信息卡」「经纬度」开关 + 相机距离决定 */
-  function poiImage(ent, near) {
-    if (!state.card || !near) return { img: ent.__card.dot.img, w: ent.__card.dot.w, h: ent.__card.dot.h, tip: 0 };
-    const c = state.coord ? ent.__card.near : ent.__card.nearNo;
-    return { img: c.img, w: c.w, h: c.h, tip: 1 };
-  }
-
-  let cardFar = false;
-  function refreshPOIStyle() {
-    poiEntities.forEach((ent) => {
-      const s = poiImage(ent, !cardFar);
-      const bb = ent.billboard;
-      if (bb.image.getValue ? bb.image.getValue() !== s.img : bb.image !== s.img) {
-        bb.image = s.img;
-        bb.width = s.w;
-        bb.height = s.h;
-      }
-      ent.polyline.show = state.leader !== false;
-    });
-  }
-
-  function updateCardScale() {
-    const h = viewer.camera.positionCartographic.height;
-    const far = h > NEAR_M * 1.6;
-    if (far !== cardFar) {
-      cardFar = far;
-      refreshPOIStyle();
-    }
-  }
-  viewer.camera.changed.addEventListener(() => {
-    if (window.__cardRAF) return;
-    window.__cardRAF = requestAnimationFrame(() => { window.__cardRAF = null; updateCardScale(); });
-  });
-  refreshPOIStyle();
 
   /* ==========================================================
    * 可种植地块
@@ -666,88 +627,45 @@
   const plotEntities = [];
   function addPlots() {
     D.plots.forEach((p, idx) => {
-      const ring = ringOf(p.r);
-      if (ring.length < 8) return;
-      let pos;
-      try { pos = Cesium.Cartesian3.fromDegreesArray(ring); } catch (e) { return; }
-      const n = ring.length / 2;
-      let sx = 0, sy = 0;
-      for (let i = 0; i < n; i++) { sx += ring[i * 2]; sy += ring[i * 2 + 1]; }
-      const cx = sx / n, cy = sy / n;
-
+      const g = ringPath(ringOf(p.r));
+      if (g.path.length < 4) return;
       const alpha = 0.10 + 0.22 * (p.s / 100);
-      const ent = viewer.entities.add({
-        polygon: {
-          hierarchy: new Cesium.PolygonHierarchy(pos),
-          height: 2.0,
-          material: Cesium.Color.fromCssColorString(PLOT_COLOR).withAlpha(alpha),
-          outline: true,
-          outlineColor: Cesium.Color.fromCssColorString(PLOT_COLOR).withAlpha(0.95),
-          outlineWidth: 2
-        },
-        position: Cesium.Cartesian3.fromDegrees(cx, cy, 2),
-        label: {
-          text: `${fmtArea(p.a)} · ${p.s}`,
-          font: "600 11px 'PingFang SC','Microsoft YaHei',sans-serif",
-          fillColor: Cesium.Color.fromCssColorString("#ffffff"),
-          outlineColor: Cesium.Color.fromCssColorString("#3b0764"),
-          outlineWidth: 3,
-          style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-          disableDepthTestDistance: Number.POSITIVE_INFINITY,
-          distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 3400),
-          translucencyByDistance: new Cesium.NearFarScalar(400, 1.0, 3400, 0.2)
-        }
+      const poly = new AMap.Polygon({
+        path: g.path,
+        fillColor: PLOT_COLOR,
+        fillOpacity: alpha,
+        strokeColor: PLOT_COLOR,
+        strokeWeight: 2,
+        strokeOpacity: 0.95,
+        zIndex: 60,
+        cursor: "pointer"
       });
-      props.set(ent, { kind: "plot", data: p, idx });
-      plotEntities.push(ent);
+      poly.__kindPoly = true;
+      props.set(poly, { kind: "plot", data: p, idx });
+      poly.on("click", () => { state.selectedPlot = p; renderDetail("plot", p); });
+      plotEntities.push(poly);
+      poly.setMap(map);
+
+      if (g.center) {
+        const tx = new AMap.Text({
+          text: fmtArea(p.a) + " · " + p.s,
+          position: g.center,
+          anchor: "center",
+          zIndex: 61,
+          style: {
+            "font-size": "11px", "font-weight": "600", color: "#ffffff",
+            "background-color": "transparent", border: "none", padding: "0",
+            "text-shadow": "-1px -1px 0 #3b0764, 1px -1px 0 #3b0764, -1px 1px 0 #3b0764, 1px 1px 0 #3b0764"
+          }
+        });
+        props.set(tx, { kind: "plot", data: p, idx });
+        tx.on("click", () => { state.selectedPlot = p; renderDetail("plot", p); });
+        plotEntities.push(tx);
+        tx.setMap(map);
+      }
     });
   }
   addPlots();
-
-  /* ==========================================================
-   * 底图坐标系切换：把已经建好的几何整体换算到新的基准
-   * ========================================================== */
-  function updateGeometry() {
-    buildingEntities.forEach((ent) => {
-      const b = props.get(ent).data;
-      ent.polygon.hierarchy = new Cesium.ConstantProperty(
-        new Cesium.PolygonHierarchy(Cesium.Cartesian3.fromDegreesArray(ringOf(b.r))));
-    });
-    poiEntities.forEach((ent) => {
-      const c = llOf(props.get(ent).data);
-      const g = Cesium.Cartesian3.fromDegrees(c[0], c[1], 0);
-      const m = Cesium.Cartesian3.fromDegrees(c[0], c[1], 46);
-      ent.position = new Cesium.ConstantPositionProperty(m);
-      ent.polyline.positions = new Cesium.ConstantProperty([g, m]);
-    });
-    roadEntities.forEach((ent) => {
-      const r = props.get(ent).data;
-      ent.polyline.positions = new Cesium.ConstantProperty(
-        Cesium.Cartesian3.fromDegreesArray(ringOf(r.r)));
-    });
-    chokeEntities.forEach((ent) => {
-      const c = llOf(props.get(ent).data);
-      ent.position = new Cesium.ConstantPositionProperty(
-        Cesium.Cartesian3.fromDegrees(c[0], c[1], 6));
-    });
-    floodEntities.forEach((ent) => {
-      const f = props.get(ent).data;
-      ent.polygon.hierarchy = new Cesium.ConstantProperty(
-        new Cesium.PolygonHierarchy(Cesium.Cartesian3.fromDegreesArray(ringOf(f.r))));
-    });
-    plotEntities.forEach((ent) => {
-      const p = props.get(ent).data;
-      const ring = ringOf(p.r);
-      ent.polygon.hierarchy = new Cesium.ConstantProperty(
-        new Cesium.PolygonHierarchy(Cesium.Cartesian3.fromDegreesArray(ring)));
-      const n = ring.length / 2;
-      let sx = 0, sy = 0;
-      for (let i = 0; i < n; i++) { sx += ring[i * 2]; sy += ring[i * 2 + 1]; }
-      ent.position = new Cesium.ConstantPositionProperty(
-        Cesium.Cartesian3.fromDegrees(sx / n, sy / n, 2));
-    });
-    scene.requestRender();
-  }
 
   /* ==========================================================
    * 工具函数
@@ -767,8 +685,6 @@
     return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   }
 
-  window.__show = renderDetail;  // 调试 / 自动化测试入口
-  window.__pick = (ent) => { const o = props.get(ent); if (o) { renderDetail(o.kind, o.data); flyToEntity(ent); } };
 
   /* ==========================================================
    * 图例与统计
@@ -818,34 +734,40 @@
   };
 
   function refreshVisibility() {
-    poiEntities.forEach((ent) => {
-      const p = props.get(ent).data;
+    poiEntities.forEach((m) => {
+      const p = props.get(m).data;
       const okCat = !state.hidden.has(p.c);
       const okPw = !state.pwOnly || p.pw === "ok" || p.pw === "part";
-      ent.show = okCat && okPw;
+      m.__baseShow = okCat && okPw;      // 折叠只影响图标样式，不影响这点位该不该出现
+      if (m.__baseShow) m.show(); else m.hide();
     });
-    plotEntities.forEach((ent) => {
-      const p = props.get(ent).data;
+    plotEntities.forEach((o) => {
+      const p = props.get(o).data;
       const ok = (!state.hidden.has(PLOT_KEY)) &&
                  p.s >= state.minScore &&
                  p.a <= state.maxArea &&
                  /* 原阈值 200 m 对全部 84 块地都成立（实际范围 4–165 m），开关等于没用；
                     收紧到 50 m 才有区分度（49 / 84 块） */
                  (!state.coreOnly || p.nb <= PLOT_NEAR_M);
-      ent.show = ok;
+      o.__vis = ok;
+      if (ok) o.show(); else o.hide();
     });
-    floodEntities.forEach((ent) => (ent.show = !state.hidden.has("hazard")));
+    floodEntities.forEach((o) => {
+      const ok = !state.hidden.has("hazard");
+      o.__vis = ok;
+      if (ok) o.show(); else o.hide();
+    });
     document.querySelectorAll("#legend .lg").forEach((d) => {
       d.classList.toggle("off", state.hidden.has(d.dataset.cat));
     });
-    updateStats();
+    refreshPOIStyle();
   }
 
   function updateStats() {
     const counts = {};
     CAT_ORDER.forEach((k) => (counts[k] = 0));
     poiEntities.forEach((e) => {
-      if (!e.show) return;
+      if (e.__baseShow === false) return;   // 折叠掉的点位仍计入统计，否则一折叠数字就掉
       const p = props.get(e).data;
       counts[p.c] = (counts[p.c] || 0) + 1;
     });
@@ -858,7 +780,7 @@
       const p = props.get(e).data;
       if (state.hidden.has(p.c)) return;
       pwTotal++;
-      if (!e.show) return;
+      if (e.__baseShow === false) return;
       pw[p.pw || "na"]++;
     });
     const kept = pw.ok + pw.part;
@@ -866,7 +788,7 @@
       ? `已保留 ${kept} / ${pwTotal}`
       : `可用 ${pw.ok} · 受限 ${pw.part} · 失效 ${pw.no}`;
 
-    const visiblePlots = plotEntities.filter((e) => e.show);
+    const visiblePlots = plotEntities.filter((e) => e.__kindPoly && e.__vis !== false);
     const area = visiblePlots.reduce((s, e) => s + props.get(e).data.a, 0);
     /* 图例上的地块计数跟着筛选走（地块不在 pois 里，得单独同步） */
     const lgPlot = document.querySelector('#legend .lg[data-cat="' + PLOT_KEY + '"] .ct');
@@ -879,6 +801,9 @@
     });
     html += `<div class="row"><i style="background:${PLOT_COLOR}"></i>候选种植地块<b>${visiblePlots.length}</b></div>`;
     html += `<div class="row"><i style="background:#c9d2de"></i>建筑体块<b>${buildingEntities.length}</b></div>`;
+    if (state.fold) {
+      html += `<div class="row"><i style="background:#94a3b8"></i>已展开信息卡<b>${expandedIds.size}</b></div>`;
+    }
     html += `<div class="note">可视地块合计 ${fmtArea(area)}，最高评分 ${top.toFixed(0)}。
               OSM 在城区的 POI 覆盖并不完整，加油站等类别已向北苑外围做半径扩展搜索。</div>`;
     el("stats").innerHTML = html;
@@ -1005,6 +930,7 @@
         const key = a.dataset.fb;
         const target = POI_BY_ID[key] || D.pois.filter((o) => o.n === key)[0];
         if (!target) return;
+        unfoldPoi(target.i);
         const ent = poiEntities.filter((e) => (props.get(e) || {}).data === target)[0];
         if (ent) { flyToEntity(ent); renderPOI(box, target); }
       });
@@ -1229,53 +1155,50 @@
   /* ==========================================================
    * 交互
    * ========================================================== */
-  function flyToEntity(ent) {
-    const o = props.get(ent);
-    let radius = 420;
-    if (o.kind === "poi") radius = 300;
-    else if (o.kind === "plot") radius = Math.max(260, Math.sqrt(o.data.a) * 2.2);
-    else if (o.kind === "road") radius = 900;
-    else if (o.kind === "choke") radius = 420;
-    else radius = Math.max(320, Math.sqrt(o.data.a || 4000) * 2.6);
-    viewer.flyTo(ent, {
-      offset: new Cesium.HeadingPitchRange(
-        viewer.camera.heading, Cesium.Math.toRadians(-42), radius),
-      duration: 1.2
-    });
+  function midOfRing(r) {
+    if (!r || r.length < 2) return null;
+    let sx = 0, sy = 0, n = 0;
+    for (let i = 0; i < r.length; i += 2) { sx += r[i]; sy += r[i + 1]; n++; }
+    return [sx / n, sy / n];
+  }
+  function flyToEntity(obj) {
+    const o = props.get(obj);
+    if (!o) return;
+    let center = null, zoom = 17;
+    if (o.kind === "poi" || o.kind === "choke") { center = [o.data.x, o.data.y]; zoom = 17.5; }
+    else if (o.kind === "plot") { center = midOfRing(o.data.r); zoom = 17; }
+    else if (o.kind === "road" || o.kind === "flood") { center = midOfRing(o.data.r); zoom = 15.5; }
+    else { center = midOfRing(o.data.r); zoom = 17; }
+    if (center) map.setZoomAndCenter(zoom, center);
+  }
+  function focusOn(lon, lat, zoom) {
+    map.setZoomAndCenter(zoom || 17, [lon, lat]);
   }
 
-  const handler = new Cesium.ScreenSpaceEventHandler(scene.canvas);
-  handler.setInputAction((movement) => {
-    const picked = scene.pick(movement.position);
-    if (Cesium.defined(picked) && picked.id && props.has(picked.id)) {
-      const o = props.get(picked.id);
-      renderDetail(o.kind, o.data);
-      if (o.kind !== "building") flyToEntity(picked.id);
-    }
-  }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+  window.__show = renderDetail;   // 调试 / 自动化测试入口
+  window.__pick = (obj) => {
+    const o = props.get(obj);
+    if (o) { renderDetail(o.kind, o.data); flyToEntity(obj); }
+  };
 
-  handler.setInputAction((movement) => {
-    const cart = viewer.camera.pickEllipsoid(movement.endPosition, scene.globe.ellipsoid);
-    if (cart) {
-      const cg = Cesium.Cartographic.fromCartesian(cart);
-      const lon = Cesium.Math.toDegrees(cg.longitude), lat = Cesium.Math.toDegrees(cg.latitude);
-      el("hud-ll").textContent = `${lon.toFixed(5)}, ${lat.toFixed(5)}`;
-      const b = baseLL();
-      const d = distMeters(lon, lat, b[0], b[1]);   // 参照点是数据里的基地，不是天安门
-      el("hud-dist").textContent = `${(d / 1000).toFixed(1)} km`;
-    }
-  }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
+  /* 光标经纬度 / 到基地距离 */
+  map.on("mousemove", (e) => {
+    const g = e.lnglat;
+    if (!g) return;
+    const lon = g.getLng(), lat = g.getLat();
+    el("hud-ll").textContent = lon.toFixed(5) + ", " + lat.toFixed(5);
+    const b = baseLL();
+    const d = distMeters(lon, lat, b[0], b[1]);
+    el("hud-dist").textContent = (d / 1000).toFixed(1) + " km";
+  });
 
-  /* 比例尺：对地面做两点反算，比按相机高度推算可靠 */
+  /* 比例尺 + 缩放级别：按 Web 墨卡托反算 米/像素 */
   const SCALE_PX = 60;
   function metersPerPixel() {
-    const w = scene.drawingBufferWidth, h = scene.drawingBufferHeight;
-    const cx = Math.floor(w / 2);
-    const cy = Math.floor(h - 18);
-    const a = viewer.camera.pickEllipsoid(new Cesium.Cartesian2(cx - SCALE_PX / 2, cy), scene.globe.ellipsoid);
-    const b = viewer.camera.pickEllipsoid(new Cesium.Cartesian2(cx + SCALE_PX / 2, cy), scene.globe.ellipsoid);
-    if (!a || !b) return 0;
-    return Cesium.Cartesian3.distance(a, b) / SCALE_PX;
+    const z = map.getZoom();
+    const c = map.getCenter();
+    const lat = c ? (c.getLat ? c.getLat() : c.lat) : CENTER.lat;
+    return 156543.03392804097 * Math.cos((lat * Math.PI) / 180) / Math.pow(2, z);
   }
   function niceRound(v) {
     const p = Math.pow(10, Math.floor(Math.log10(v)));
@@ -1283,22 +1206,24 @@
     const step = n >= 5 ? 5 : n >= 2 ? 2 : 1;
     return step * p;
   }
-
-  let hudTick = 0;
-  viewer.scene.postRender.addEventListener(() => {
-    const ch = viewer.camera.positionCartographic.height;
-    el("hud-alt").textContent = ch > 1000 ? (ch / 1000).toFixed(2) + " km" : Math.round(ch) + " m";
-    if (++hudTick % 8 !== 0) return;
+  function updateHud() {
+    el("hud-alt").textContent = "Z" + Number(map.getZoom()).toFixed(1);
     const mpp = metersPerPixel();
     if (!mpp) return;
     const barMeters = niceRound(mpp * SCALE_PX);
     const px = Math.round(barMeters / mpp);
     el("scale-text").innerHTML =
-      `<span class="bar" style="width:${Math.min(160, px)}px"></span>` +
-      `${barMeters >= 1000 ? (barMeters / 1000).toFixed(1) + " km" : Math.round(barMeters) + " m"}`;
-  });
+      '<span class="bar" style="width:' + Math.min(160, px) + 'px"></span>' +
+      (barMeters >= 1000 ? (barMeters / 1000).toFixed(1) + " km" : Math.round(barMeters) + " m");
+  }
+  map.on("zoomend", updateHud);
+  map.on("moveend", updateHud);
+  map.on("complete", updateHud);
 
   /* ---------------- 侧栏控件 ---------------- */
+  function setVis(list, on) {
+    list.forEach((o) => { o.__vis = on; if (on) o.show(); else o.hide(); });
+  }
   el("tg-dim").addEventListener("change", (e) => {
     state.dim = e.target.checked;
     if (state.dim && state.dimAlpha > 0.92) {   // 勾选时给一个能看出效果的默认值
@@ -1313,45 +1238,45 @@
     el("v-dim").textContent = Math.round(state.dimAlpha * 100) + "%";
     applyDim();
   });
-  el("tg-build").addEventListener("change", (e) => {
-    state.buildings = e.target.checked;
-    buildingEntities.forEach((ent) => (ent.show = e.target.checked));
-  });
-  el("tg-roads").addEventListener("change", (e) => {
-    roadEntities.forEach((ent) => (ent.show = e.target.checked));
-  });
-  el("tg-choke").addEventListener("change", (e) => {
-    chokeEntities.forEach((ent) => (ent.show = e.target.checked));
-  });
-  el("tg-people").addEventListener("change", (e) => {
-    state.people = e.target.checked;
-    applyPeople(e.target.checked);
-  });
+  el("tg-build").addEventListener("change", (e) => setVis(buildingEntities, e.target.checked));
+  el("tg-roads").addEventListener("change", (e) => setVis(roadEntities, e.target.checked));
+  el("tg-choke").addEventListener("change", (e) => setVis(chokeEntities, e.target.checked));
+  el("tg-people").addEventListener("change", (e) => applyPeople(e.target.checked));
   el("tg-pw").addEventListener("change", (e) => {
     state.pwOnly = e.target.checked;
     refreshVisibility();
   });
   el("tg-label").addEventListener("change", (e) => {
     state.card = e.target.checked;
-    plotEntities.forEach((ent) => { if (ent.label) ent.label.show = e.target.checked; });
     refreshPOIStyle();
   });
   el("tg-coord").addEventListener("change", (e) => {
     state.coord = e.target.checked;
     refreshPOIStyle();
   });
-  el("tg-leader").addEventListener("change", (e) => {
-    state.leader = e.target.checked;
+  el("tg-fold").addEventListener("change", (e) => {
+    state.fold = e.target.checked;      // 勾上 = 默认折叠，只有点开的才展开
     refreshPOIStyle();
   });
+  el("r-sens").addEventListener("input", (e) => {
+    state.sens = parseFloat(e.target.value) / 100;
+    el("v-sens").textContent = Math.round(state.sens * 100) + "%";
+    applyMouseSens(state.sens);
+  });
+  el("btn-fold-all").addEventListener("click", collapseAll);
+  el("btn-unfold-all").addEventListener("click", expandAll);
+  el("btn-key").addEventListener("click", () => {
+    el("keypanel").classList.remove("hidden");
+    const i = el("key-input");
+    if (i && !i.value) {
+      try { i.value = (localStorage.getItem("amap_key") || "").trim(); } catch (err) {}
+    }
+    if (i) i.focus();
+  });
+
   el("tg-core").addEventListener("change", (e) => {
     state.coreOnly = e.target.checked;
     refreshVisibility();
-  });
-  el("r-height").addEventListener("input", (e) => {
-    state.heightScale = parseFloat(e.target.value);
-    el("v-height").textContent = state.heightScale.toFixed(1) + "×";
-    applyHeightScale();
   });
   el("r-score").addEventListener("input", (e) => {
     state.minScore = parseFloat(e.target.value);
@@ -1373,27 +1298,18 @@
   el("viewmode").addEventListener("change", (e) => setView(e.target.value));
 
   /* ---------------- 视角 ---------------- */
-  const CENTER = {
-    lon: (D.meta.center && D.meta.center[0]) || 116.4272,
-    lat: (D.meta.center && D.meta.center[1]) || 40.0334
-  };
   function setView(mode) {
-    const c = useWgs ? gcj2wgs(CENTER.lon, CENTER.lat) : [CENTER.lon, CENTER.lat];
-    const center = Cesium.Cartesian3.fromDegrees(c[0], c[1], 10);
     const cfg = {
-      tilt:     { radius: 1150, pitch: -42, heading: 28 },
-      top:      { radius: 2400, pitch: -89, heading: 0 },
-      street:   { radius:  520, pitch: -26, heading: 15 },
-      district: { radius: 5200, pitch: -55, heading: 22 }
-    }[mode] || { radius: 1150, pitch: -42, heading: 28 };
-    viewer.camera.flyToBoundingSphere(new Cesium.BoundingSphere(center, cfg.radius), {
-      offset: new Cesium.HeadingPitchRange(
-        Cesium.Math.toRadians(cfg.heading), Cesium.Math.toRadians(cfg.pitch), cfg.radius),
-      duration: 1.5
-    });
+      street:   { zoom: 18,   pitch: 0  },
+      tilt:     { zoom: 16.5, pitch: 45 },
+      top:      { zoom: 15.5, pitch: 0  },
+      district: { zoom: 13.5, pitch: 0  }
+    }[mode] || { zoom: 16.5, pitch: 45 };
+    map.setPitch(cfg.pitch);
+    map.setZoomAndCenter(cfg.zoom, [CENTER.lon, CENTER.lat]);
   }
 
-    /* ---------------- 搜索 ---------------- */
+  /* ---------------- 搜索 ---------------- */
   const sInput = el("search"), sList = el("search-list");
   sInput.addEventListener("input", () => {
     const q = sInput.value.trim().toLowerCase();
@@ -1414,10 +1330,11 @@
           const p = hits.find((x) => x.n === d.dataset.k);
           sList.classList.remove("on");
           sInput.value = p.n;
-          const pc = llOf(p);
-          viewer.camera.flyToBoundingSphere(
-            new Cesium.BoundingSphere(Cesium.Cartesian3.fromDegrees(pc[0], pc[1], 20), 340),
-            { offset: new Cesium.HeadingPitchRange(0, Cesium.Math.toRadians(-42), 340), duration: 1.3 });
+          /* 搜索即显示：类别被隐藏就放开，点位被折叠就展开 */
+          if (state.hidden.has(p.c)) { state.hidden.delete(p.c); refreshVisibility(); }
+          unfoldPoi(p.i);
+          currentPoiId = p.i;
+          focusOn(p.x, p.y, 17.5);
           renderDetail("poi", p);
         });
       });
@@ -1447,9 +1364,8 @@
      ≥15 层提示可能有避难层（需现场确认）。平面路况好不等于高层能用。`,
     `<b>人本身</b>：勾「人群密度着色」按估算人口给建筑上色；小区出入口、地铁、学校单列一类。
      灾时最大的变量是人群流动，不是资源分布——撤离瓶颈常在出入口与楼梯。`,
-    `<b>底图与坐标</b>：底图 © 高德（本机版）／OpenStreetMap contributors·Esri（公网版）；建筑轮廓、道路、
-     POI 来自 OpenStreetMap（Overpass API，ODbL 1.0），数据存的是 GCJ-02。<b>渲染时会按底图自动换算</b>：
-     高德系底图用 GCJ-02，OSM / Esri 用 WGS-84（GCJ-02 反解），两者相差约 550 m，换算错了整张图都会偏移。`,
+    `<b>底图与坐标</b>：底图 © 高德地图（JS API，GCJ-02）；建筑轮廓、道路、POI 来自 OpenStreetMap
+     （Overpass API，ODbL 1.0），数据同样按 GCJ-02 存储，<b>与底图一致、无需换算</b>。`,
     `<b>已知缺口</b>：OSM 在城区的 POI 与门牌覆盖不完整（楼号仅 ${D.pois.filter((p) => p.hn).length}/${D.pois.length} 个点位有），
      水厂泵站、AED、低洼洪水区等类别是<b>几何推算或类别推断</b>，不是实测。这不是一张可执行的图，是一张待现场核实的底稿。`
   ].map((s) => `<li>${s}</li>`).join("");
@@ -1460,14 +1376,16 @@
     `${D.buildings.length} 栋建筑`;
 
   /* ---------------- 启动 ---------------- */
+  bindKeyPanel();
   if (location.protocol === "file:") {
     const w = document.getElementById("file-warning");
     if (w) w.style.display = "block";
   }
-  geometryReady = true;   // 之后切换底图才会触发几何换算
+  applyMouseSens(state.sens);
   buildLegend();
   refreshVisibility();
   setView("tilt");
   el("viewmode").value = "tilt";
+  updateHud();
   el("loading").classList.add("hidden");
 })();

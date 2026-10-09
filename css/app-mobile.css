@@ -196,3 +196,19 @@ html, body {
 
 /* 隐藏高德 logo 之外的干扰（保留版权） */
 .amap-logo, .amap-copyright { opacity: .5; }
+
+/* 数据纠错反馈条 */
+.m-rpt { margin-top: 10px; padding: 8px 9px; border: 1px dashed #e2e6ec;
+  border-radius: 9px; background: #fbfcfe; }
+.m-rpt > span { font-size: 12px; font-weight: 600; color: #1f2937; margin-right: 6px; }
+.m-rptb { margin: 4px 5px 0 0; padding: 5px 10px; font-size: 12px;
+  border: 1px solid #dfe3e9; border-radius: 7px; background: #fff; color: #1f2937; }
+.m-rpts { margin-top: 5px; font-size: 11px; color: #8b93a1; }
+
+
+/* 数据核验徽章 */
+.ck { display: inline-block; font-size: 12px; padding: 2px 8px; border-radius: 99px; }
+.ck.ok   { background: #dcfce7; color: #15803d; }
+.ck.warn { background: #fef3c7; color: #92400e; }
+.ck.dead { background: #fee2e2; color: #b91c1c; }
+.ck.unk  { background: #f1f3f6; color: #64748b; }

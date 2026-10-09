@@ -74,6 +74,7 @@
     dim: false,
     dimAlpha: 1,
     sens: 0.35,        // 鼠标灵敏度倍率（1 = 原始手感）
+    hideStale: true,   // 隐藏「OSM+高德都查不到」的疑似已关闭点位
     selectedCrop: "sweetpotato",
     selectedPlot: null,
     visibleCount: {}
@@ -738,7 +739,8 @@
       const p = props.get(m).data;
       const okCat = !state.hidden.has(p.c);
       const okPw = !state.pwOnly || p.pw === "ok" || p.pw === "part";
-      m.__baseShow = okCat && okPw;      // 折叠只影响图标样式，不影响这点位该不该出现
+      const okStale = !state.hideStale || p._v !== "dead";
+      m.__baseShow = okCat && okPw && okStale;   // 折叠只影响图标样式，不影响这点位该不该出现
       if (m.__baseShow) m.show(); else m.hide();
     });
     plotEntities.forEach((o) => {
@@ -885,6 +887,75 @@
       <br><span class="sub">${d}　步行约 ${t}</span>`;
   }
 
+  /* ---------------- 数据纠错反馈 ----------------
+   * OSM 是众包数据，点位可能已经拆除 / 搬走 / 改名。
+   * 每个点都给一枚「报错」按钮：点一下复制一条结构化反馈，
+   * 用户发回来后由维护者批量写进 tools/fix_data.py 的 REMOVE / RECLASS 表。 */
+  const REPORT_LABEL = { gone: "已拆除 / 搬走", wrong: "信息有误", moved: "位置偏移" };
+
+  function reportHtml() {
+    return `<div class="rpt"><span class="rpt-t">这里不对？</span>`
+      + Object.keys(REPORT_LABEL).map((k) =>
+        `<button class="rpt-b" data-rpt="${k}">${REPORT_LABEL[k]}</button>`).join("")
+      + `<div class="rpt-s">点一下会复制一条反馈，发给我就能改数据</div></div>`;
+  }
+
+  function copyText(s) {
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(s);
+        return;
+      }
+    } catch (e) {}
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = s;
+      ta.style.cssText = "position:fixed;left:-9999px";
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+    } catch (e) {}
+  }
+
+  function bindReport(box, p) {
+    box.querySelectorAll(".rpt-b").forEach((b) => {
+      b.addEventListener("click", () => {
+        const kind = REPORT_LABEL[b.dataset.rpt] || "纠错";
+        const today = new Date().toISOString().slice(0, 10);
+        const txt = `[${kind}] ${p.i || "-"} | ${p.n || "-"} | `
+          + `${p.c}${p.sub ? "/" + p.sub : ""} | ${today}`;
+        copyText(txt);
+        try {
+          const arr = JSON.parse(localStorage.getItem("pm_report") || "[]");
+          arr.push(txt);
+          localStorage.setItem("pm_report", JSON.stringify(arr));
+        } catch (e) {}
+        const old = b.textContent;
+        b.textContent = "已复制 ✓";
+        b.classList.add("ok");
+        setTimeout(() => { b.textContent = old; b.classList.remove("ok"); }, 2000);
+      });
+    });
+  }
+
+  /* 数据核验徽章：结论由 tools/amap_verify.py + refresh_check.py 预先算好烧进数据 */
+  function ckRow(p) {
+    const MAP = {
+      ok:   ["ok",   "两处数据源都能查到"],
+      warn: ["warn", "位置在但名称对不上，可能换了商户"],
+      dead: ["dead", "OSM 与高德都查不到，疑似已关闭 / 搬走"],
+      unk:  ["unk",  "设施型点位，无法自动核验"]
+    };
+    const v = MAP[p._v] || MAP.unk;
+    let s = `<span class="ck ${v[0]}">${v[1]}</span>`;
+    if (p.amn) s += `<br><span class="sub">高德收录名：${esc(p.amn)}</span>`;
+    const osmTxt = p.osm === "gone" ? "已删除" : (p.osm === "unknown" ? "未查到" : "仍在");
+    const amTxt = p.am === "alive" ? "有" : (p.am === "gone" ? "查无" : (p.am === "renamed" ? "名称不同" : "未判定"));
+    s += `<br><span class="sub">交叉核验 ${esc(p.ck || "—")} ｜ OSM ${osmTxt} ｜ 高德 ${amTxt}</span>`;
+    return s;
+  }
+
   function renderPOI(box, p) {
     const c = CATS[p.c];
     const pw = p.pw || "na";
@@ -899,6 +970,7 @@
     rows.push(["⑤ 最近核实",
       `<b style="color:#b45309">${esc(p.vf || "—")}　未现场核实</b>
        <br><span class="sub">OSM 快照日期，非实地踏勘；用前需现场确认</span>`]);
+    rows.push(["⑥ 数据核验", ckRow(p)]);
 
     /* 垂直维度 */
     rows.push(["楼层", levelFull(p)]);
@@ -923,8 +995,10 @@
     if (extra.length) {
       html += `<div class="tags">OSM 原始标签：${extra.slice(0, 8).map((k) => esc(k + "=" + t[k])).join(" · ")}</div>`;
     }
+    html += reportHtml();
     box.className = "detail";
     box.innerHTML = html;
+    bindReport(box, p);
     box.querySelectorAll(".fb-link").forEach((a) => {
       a.addEventListener("click", () => {
         const key = a.dataset.fb;
@@ -1294,6 +1368,17 @@
     el("detail-panel").classList.toggle("collapsed");
     el("detail-close").textContent = el("detail-panel").classList.contains("collapsed") ? "▾" : "×";
   });
+  const tgStale = el("tg-stale");
+  if (tgStale) {
+    const nDead = D.pois.filter((p) => p._v === "dead").length;
+    const nb = document.getElementById("n-stale");
+    if (nb) nb.textContent = nDead;
+    tgStale.checked = state.hideStale;
+    tgStale.addEventListener("change", (e) => {
+      state.hideStale = e.target.checked;
+      refreshVisibility();
+    });
+  }
   el("btn-reset").addEventListener("click", () => setView("top"));
   const sw = document.getElementById("btn-switch");
   if (sw) sw.addEventListener("click", () => {

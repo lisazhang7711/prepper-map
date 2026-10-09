@@ -106,9 +106,11 @@
     items.push({ p: p, mk: mk, el: el, cat: cat });
   });
 
+  let hideStale = true;   // 隐藏「OSM+高德都查不到」的疑似已关闭点位
+
   function applyFilter() {
     items.forEach((it) => {
-      const on = !hidden.has(it.p.c);
+      const on = !hidden.has(it.p.c) && !(hideStale && it.p._v === "dead");
       if (on) it.mk.setMap(map); else it.mk.setMap(null);
     });
     renderChips();
@@ -186,6 +188,42 @@
     return '<div class="m-row"><span class="k">' + k + '</span><span class="v">' + v + '</span></div>';
   }
 
+  /* 数据纠错：复制一条结构化反馈 */
+  function copyTextM(s) {
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(s);
+        return;
+      }
+    } catch (e) {}
+    try {
+      var ta = document.createElement("textarea");
+      ta.value = s;
+      ta.style.cssText = "position:fixed;left:-9999px";
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+    } catch (e) {}
+  }
+
+  function ckHtml(p) {
+    const MAP = {
+      ok:   ["ok",   "两处数据源都能查到"],
+      warn: ["warn", "位置在但名称对不上，可能换了商户"],
+      dead: ["dead", "OSM 与高德都查不到，疑似已关闭 / 搬走"],
+      unk:  ["unk",  "设施型点位，无法自动核验"]
+    };
+    const v = MAP[p._v] || MAP.unk;
+    let s = '<span class="ck ' + v[0] + '">' + v[1] + '</span>';
+    if (p.amn) s += '<br><span style="font-size:11px;color:#8b93a1">高德收录名：' + p.amn + '</span>';
+    const osmTxt = p.osm === "gone" ? "已删除" : (p.osm === "unknown" ? "未查到" : "仍在");
+    const amTxt = p.am === "alive" ? "有" : (p.am === "gone" ? "查无" : (p.am === "renamed" ? "名称不同" : "未判定"));
+    s += '<br><span style="font-size:11px;color:#8b93a1">交叉核验 ' + (p.ck || "—")
+       + ' ｜ OSM ' + osmTxt + ' ｜ 高德 ' + amTxt + '</span>';
+    return s;
+  }
+
   function select(p, mk) {
     selected = p;
     items.forEach((it) => it.el.classList.remove("sel"));
@@ -216,6 +254,11 @@
       + '<button class="btn" id="m-back">收起</button>'
       + '<button class="btn pri" id="m-center">居中</button>'
       + '</div>';
+    h += row("数据核验", ckHtml(p));
+    h += '<div class="m-rpt"><span>这里不对？</span>'
+      + '<button class="m-rptb" data-rpt="gone">已拆除 / 搬走</button>'
+      + '<button class="m-rptb" data-rpt="wrong">信息有误</button>'
+      + '<div class="m-rpts">点一下会复制一条反馈，发给我就能改数据</div></div>';
 
     detailBox.innerHTML = h;
     detailBox.hidden = false;
@@ -233,6 +276,22 @@
       }
       selected = null;
       collapseSheet();
+    });
+    detailBox.querySelectorAll(".m-rptb").forEach(function (b) {
+      b.addEventListener("click", function () {
+        var kind = b.dataset.rpt === "gone" ? "已拆除 / 搬走" : "信息有误";
+        var txt = "[" + kind + "] " + (p.i || "-") + " | " + (p.n || "-") + " | "
+          + p.c + (p.sub ? "/" + p.sub : "") + " | " + new Date().toISOString().slice(0, 10);
+        copyTextM(txt);
+        try {
+          var arr = JSON.parse(localStorage.getItem("pm_report") || "[]");
+          arr.push(txt);
+          localStorage.setItem("pm_report", JSON.stringify(arr));
+        } catch (e) {}
+        var old = b.textContent;
+        b.textContent = "已复制 ✓";
+        setTimeout(function () { b.textContent = old; }, 2000);
+      });
     });
     document.getElementById("m-center").addEventListener("click", () => {
       map.setZoomAndCenter(17.5, [p.x, p.y]);
@@ -299,6 +358,18 @@
     setBuildings(buildOn);
     buildBtn.classList.toggle("on", buildOn);
   });
+
+  const staleBtn = document.getElementById("m-stale");
+  if (staleBtn) {
+    const nDead = D.pois.filter((p) => p._v === "dead").length;
+    staleBtn.title = "隐藏疑似已关闭（" + nDead + " 个）";
+    staleBtn.classList.toggle("on", hideStale);
+    staleBtn.addEventListener("click", () => {
+      hideStale = !hideStale;
+      staleBtn.classList.toggle("on", hideStale);
+      applyFilter();
+    });
+  }
 
   /* ---------------- 启动 ---------------- */
   renderChips();

@@ -15,7 +15,82 @@
   /* 「可种地」这一类在新旧数据里键名不同，统一取 */
   const PLOT_KEY = CATS.plot ? "plot" : "farm";
   const PLOT_COLOR = (CATS[PLOT_KEY] || { color: "#8B5CF6" }).color;
+  const PLOT_NEAR_M = 50;     // 「宅边地块」：离最近建筑 50 m 以内
   const DEG_M = 111320;
+
+  /* ==========================================================
+   * 坐标基准
+   * 数据里的 x,y 是 GCJ-02（与高德对齐）；OSM / Esri 瓦片是 WGS-84。
+   * 两者相差约 550 m，不换算的话整张图（点、楼、路、地块）都会偏出去。
+   * 这里按当前底图的基准自动选择：高德系底图用 GCJ-02，其余用 WGS-84。
+   * ========================================================== */
+  const gcj2wgs = (function () {
+    const A = 6378245.0, EE = 0.00669342162296594323;
+    function tl(x, y) {
+      let r = 300.0 + x + 2.0 * y + 0.1 * x * x + 0.1 * x * y + 0.1 * Math.sqrt(Math.abs(x));
+      r += (20.0 * Math.sin(6.0 * x * Math.PI) + 20.0 * Math.sin(2.0 * x * Math.PI)) * 2 / 3;
+      r += (20.0 * Math.sin(x * Math.PI) + 40.0 * Math.sin(x / 3.0 * Math.PI)) * 2 / 3;
+      r += (150.0 * Math.sin(x / 12.0 * Math.PI) + 300.0 * Math.sin(x / 30.0 * Math.PI)) * 2 / 3;
+      return r;
+    }
+    function tt(x, y) {
+      let r = -100.0 + 2.0 * x + 3.0 * y + 0.2 * y * y + 0.1 * x * y + 0.2 * Math.sqrt(Math.abs(x));
+      r += (20.0 * Math.sin(6.0 * x * Math.PI) + 20.0 * Math.sin(2.0 * x * Math.PI)) * 2 / 3;
+      r += (20.0 * Math.sin(y * Math.PI) + 40.0 * Math.sin(y / 3.0 * Math.PI)) * 2 / 3;
+      r += (160.0 * Math.sin(y / 12.0 * Math.PI) + 320.0 * Math.sin(y * Math.PI / 30.0)) * 2 / 3;
+      return r;
+    }
+    function gcjOf(lon, lat) {
+      const dx = tl(lon - 105.0, lat - 35.0), dy = tt(lon - 105.0, lat - 35.0);
+      const rad = lat / 180.0 * Math.PI;
+      const magic = 1 - EE * Math.sin(rad) * Math.sin(rad);
+      const sq = Math.sqrt(magic);
+      const dlat = (dy * 180.0) / ((A * (1 - EE)) / (magic * sq) * Math.PI);
+      const dlon = (dx * 180.0) / (A / sq * Math.cos(rad) * Math.PI);
+      return [lon + dlon, lat + dlat];
+    }
+    return function (lon, lat) {
+      let wx = lon, wy = lat;
+      for (let i = 0; i < 3; i++) {
+        const g = gcjOf(wx, wy);
+        wx += lon - g[0];
+        wy += lat - g[1];
+      }
+      return [wx, wy];
+    };
+  })();
+  window.__gcj2wgs = gcj2wgs;
+
+  /* 高德系瓦片本身就是 GCJ-02，其余（OSM / Esri）是 WGS-84 */
+  const GCJ_BASEMAPS = ["amap", "amap_pure", "amap_sat"];
+  let useWgs = false;          // 当前是否按 WGS-84 出图
+  let geometryReady = false;   // 几何是否已建好（建好之后切底图才需要重算）
+
+  /* 单个点位 -> [lon, lat]（有 wx/wy 就直接用，缺失再反解） */
+  function llOf(p) {
+    if (!useWgs) return [p.x, p.y];
+    if (p.wx != null && p.wy != null) return [p.wx, p.wy];
+    return gcj2wgs(p.x, p.y);
+  }
+  /* 扁平环 [x,y,x,y,…] -> [lon,lat,…] */
+  function ringOf(r) {
+    if (!useWgs) return r;
+    const out = new Array(r.length);
+    for (let i = 0; i < r.length; i += 2) {
+      const w = gcj2wgs(r[i], r[i + 1]);
+      out[i] = w[0]; out[i + 1] = w[1];
+    }
+    return out;
+  }
+  /* 基地（HUD「光标到基地」的参照点），数据里是 GCJ-02 */
+  const BASE_GCJ = (function () {
+    const b = D.meta && D.meta.base, c = D.meta && D.meta.center;
+    const v = (b && b.length === 2) ? b : ((c && c.length === 2) ? c : null);
+    return v ? [v[0], v[1]] : [116.4272486, 40.0334017];
+  })();
+  function baseLL() {
+    return useWgs ? gcj2wgs(BASE_GCJ[0], BASE_GCJ[1]) : BASE_GCJ;
+  }
 
   const el = (id) => document.getElementById(id);
   const $ = (s) => document.querySelector(s);
@@ -78,6 +153,7 @@
   // 直连（默认，任何静态服务器都能用，但会受浏览器跨域/防盗链影响）
   const DIRECT_URL = {
     osm:       "https://tile.openstreetmap.de/{z}/{x}/{y}.png",
+    osm_main:  "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
     esri:      "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
   };
   // 走 server.py 的同源代理（无跨域限制 + 磁盘缓存 + 可离线）
@@ -121,21 +197,48 @@
   }
 
   let baseLayer = null;
+
+  /* 瓦片降级：OSM 社区镜像被限流时切到官方源，再不行由 Cesium 显示底色 */
+  let osmMirror = false;
+  let tileErr = 0;
+  function onTileError() {
+    if (++tileErr < 6) return;
+    tileErr = 0;
+    const key = currentBasemap();
+    if (key === "osm" && !osmMirror) {
+      osmMirror = true;
+      console.warn("[basemap] OSM 镜像连续失败，切到官方瓦片源");
+      setBasemap("osm");
+    }
+  }
+  function tileUrl(key, fallbackUrl) {
+    if (netMode === "proxy") return PROXY_URL[key] || fallbackUrl;
+    if (key === "osm") return osmMirror ? DIRECT_URL.osm_main : DIRECT_URL.osm;
+    return DIRECT_URL[key] || fallbackUrl;
+  }
+
   function setBasemap(key) {
     const cfg = BASEMAPS[key] || BASEMAPS.osm;
-    const url = (netMode === "proxy" ? PROXY_URL : DIRECT_URL)[key] || DIRECT_URL.osm;
+    const wgs = GCJ_BASEMAPS.indexOf(key) < 0;
+    const datumChanged = wgs !== useWgs;
+    useWgs = wgs;
+    const url = tileUrl(key, DIRECT_URL.osm);
     if (baseLayer) scene.imageryLayers.remove(baseLayer, true);
     try {
-      baseLayer = scene.imageryLayers.addImageryProvider(new Cesium.UrlTemplateImageryProvider({
+      const provider = new Cesium.UrlTemplateImageryProvider({
         url: url,
         subdomains: netMode === "proxy" ? [""] : (cfg.subdomains || [""]),
         maximumLevel: cfg.max,
         credit: new Cesium.Credit(cfg.credit, false)
-      }), 0);
+      });
+      if (provider.errorEvent) provider.errorEvent.addEventListener(onTileError);
+      baseLayer = scene.imageryLayers.addImageryProvider(provider, 0);
       applyDim();
     } catch (e) {
       console.warn("底图切换失败", e);
     }
+    /* 底图坐标系变了，矢量要素要整体换算一次，否则又会偏 550 m */
+    if (datumChanged && geometryReady) updateGeometry();
   }
 
   const currentBasemap = () => el("basemap").value || "osm";
@@ -318,8 +421,7 @@
   const buildingEntities = [];
   function addBuildings() {
     D.buildings.forEach((b) => {
-      const ring = [];
-      for (let i = 0; i < b.r.length; i += 2) ring.push(b.r[i], b.r[i + 1]);
+      const ring = ringOf(b.r);
       if (ring.length < 8) return;
       let pos;
       try {
@@ -366,8 +468,9 @@
     D.pois.forEach((p) => {
       const card = CARD[p.i];
       const top = 46;
-      const groundPos = Cesium.Cartesian3.fromDegrees(p.x, p.y, 0);
-      const midPos = Cesium.Cartesian3.fromDegrees(p.x, p.y, top);
+      const c = llOf(p);
+      const groundPos = Cesium.Cartesian3.fromDegrees(c[0], c[1], 0);
+      const midPos = Cesium.Cartesian3.fromDegrees(c[0], c[1], top);
 
       const ent = viewer.entities.add({
         position: midPos,
@@ -399,8 +502,7 @@
   const roadEntities = [];
   function addRoads() {
     (D.roads || []).forEach((r) => {
-      const pts = [];
-      for (let i = 0; i < r.r.length; i += 2) pts.push(r.r[i], r.r[i + 1]);
+      const pts = ringOf(r.r);
       if (pts.length < 4) return;
       const ent = viewer.entities.add({
         polyline: {
@@ -422,8 +524,9 @@
   const chokeEntities = [];
   function addChokes() {
     (D.chokes || []).forEach((k) => {
+      const c = llOf(k);
       const ent = viewer.entities.add({
-        position: Cesium.Cartesian3.fromDegrees(k.x, k.y, 6),
+        position: Cesium.Cartesian3.fromDegrees(c[0], c[1], 6),
         billboard: {
           image: chokeIcon(k.k), width: 26, height: 26,
           verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
@@ -469,8 +572,7 @@
   const floodEntities = [];
   function addFloods() {
     (D.floods || []).forEach((f) => {
-      const pts = [];
-      for (let i = 0; i < f.r.length; i += 2) pts.push(f.r[i], f.r[i + 1]);
+      const pts = ringOf(f.r);
       if (pts.length < 8) return;
       let pos;
       try { pos = Cesium.Cartesian3.fromDegreesArray(pts); } catch (e) { return; }
@@ -564,8 +666,7 @@
   const plotEntities = [];
   function addPlots() {
     D.plots.forEach((p, idx) => {
-      const ring = [];
-      for (let i = 0; i < p.r.length; i += 2) ring.push(p.r[i], p.r[i + 1]);
+      const ring = ringOf(p.r);
       if (ring.length < 8) return;
       let pos;
       try { pos = Cesium.Cartesian3.fromDegreesArray(ring); } catch (e) { return; }
@@ -604,6 +705,51 @@
   addPlots();
 
   /* ==========================================================
+   * 底图坐标系切换：把已经建好的几何整体换算到新的基准
+   * ========================================================== */
+  function updateGeometry() {
+    buildingEntities.forEach((ent) => {
+      const b = props.get(ent).data;
+      ent.polygon.hierarchy = new Cesium.ConstantProperty(
+        new Cesium.PolygonHierarchy(Cesium.Cartesian3.fromDegreesArray(ringOf(b.r))));
+    });
+    poiEntities.forEach((ent) => {
+      const c = llOf(props.get(ent).data);
+      const g = Cesium.Cartesian3.fromDegrees(c[0], c[1], 0);
+      const m = Cesium.Cartesian3.fromDegrees(c[0], c[1], 46);
+      ent.position = new Cesium.ConstantPositionProperty(m);
+      ent.polyline.positions = new Cesium.ConstantProperty([g, m]);
+    });
+    roadEntities.forEach((ent) => {
+      const r = props.get(ent).data;
+      ent.polyline.positions = new Cesium.ConstantProperty(
+        Cesium.Cartesian3.fromDegreesArray(ringOf(r.r)));
+    });
+    chokeEntities.forEach((ent) => {
+      const c = llOf(props.get(ent).data);
+      ent.position = new Cesium.ConstantPositionProperty(
+        Cesium.Cartesian3.fromDegrees(c[0], c[1], 6));
+    });
+    floodEntities.forEach((ent) => {
+      const f = props.get(ent).data;
+      ent.polygon.hierarchy = new Cesium.ConstantProperty(
+        new Cesium.PolygonHierarchy(Cesium.Cartesian3.fromDegreesArray(ringOf(f.r))));
+    });
+    plotEntities.forEach((ent) => {
+      const p = props.get(ent).data;
+      const ring = ringOf(p.r);
+      ent.polygon.hierarchy = new Cesium.ConstantProperty(
+        new Cesium.PolygonHierarchy(Cesium.Cartesian3.fromDegreesArray(ring)));
+      const n = ring.length / 2;
+      let sx = 0, sy = 0;
+      for (let i = 0; i < n; i++) { sx += ring[i * 2]; sy += ring[i * 2 + 1]; }
+      ent.position = new Cesium.ConstantPositionProperty(
+        Cesium.Cartesian3.fromDegrees(sx / n, sy / n, 2));
+    });
+    scene.requestRender();
+  }
+
+  /* ==========================================================
    * 工具函数
    * ========================================================== */
   function fmtArea(a) {
@@ -632,7 +778,10 @@
     box.innerHTML = "";
     CAT_ORDER.forEach((k) => {
       const c = CATS[k];
-      const n = D.pois.filter((p) => p.c === k).length;
+      /* 地块不在 D.pois 里，单独取，否则图例永远显示 0 */
+      const n = (k === PLOT_KEY)
+        ? (D.plots || []).length
+        : D.pois.filter((p) => p.c === k).length;
       const div = document.createElement("div");
       div.className = "lg";
       div.dataset.cat = k;
@@ -680,7 +829,9 @@
       const ok = (!state.hidden.has(PLOT_KEY)) &&
                  p.s >= state.minScore &&
                  p.a <= state.maxArea &&
-                 (!state.coreOnly || p.nb <= 200);
+                 /* 原阈值 200 m 对全部 84 块地都成立（实际范围 4–165 m），开关等于没用；
+                    收紧到 50 m 才有区分度（49 / 84 块） */
+                 (!state.coreOnly || p.nb <= PLOT_NEAR_M);
       ent.show = ok;
     });
     floodEntities.forEach((ent) => (ent.show = !state.hidden.has("hazard")));
@@ -700,18 +851,26 @@
     });
     state.visibleCount = counts;
 
-    /* 断电可用性统计 */
+    /* 断电可用性统计：勾了筛选就报筛选后的口径，否则会让用户以为开关没生效 */
     const pw = { ok: 0, part: 0, no: 0, na: 0 };
+    let pwTotal = 0;
     poiEntities.forEach((e) => {
       const p = props.get(e).data;
       if (state.hidden.has(p.c)) return;
+      pwTotal++;
+      if (!e.show) return;
       pw[p.pw || "na"]++;
     });
-    el("pw-count").textContent =
-      `可用 ${pw.ok} · 受限 ${pw.part} · 失效 ${pw.no}`;
+    const kept = pw.ok + pw.part;
+    el("pw-count").textContent = state.pwOnly
+      ? `已保留 ${kept} / ${pwTotal}`
+      : `可用 ${pw.ok} · 受限 ${pw.part} · 失效 ${pw.no}`;
 
     const visiblePlots = plotEntities.filter((e) => e.show);
     const area = visiblePlots.reduce((s, e) => s + props.get(e).data.a, 0);
+    /* 图例上的地块计数跟着筛选走（地块不在 pois 里，得单独同步） */
+    const lgPlot = document.querySelector('#legend .lg[data-cat="' + PLOT_KEY + '"] .ct');
+    if (lgPlot) lgPlot.textContent = visiblePlots.length;
     const top = Math.max(0, ...visiblePlots.map((e) => props.get(e).data.s));
 
     let html = "";
@@ -778,42 +937,7 @@
     return rows;
   }
 
-  /* GCJ-02 → WGS-84（迭代反解，供建筑详情显示 GPS 原始坐标） */
-  window.__gcj2wgs = (function () {
-    const A = 6378245.0, EE = 0.00669342162296594323;
-    function tl(x, y) {
-      let r = 300.0 + x + 2.0 * y + 0.1 * x * x + 0.1 * x * y + 0.1 * Math.sqrt(Math.abs(x));
-      r += (20.0 * Math.sin(6.0 * x * Math.PI) + 20.0 * Math.sin(2.0 * x * Math.PI)) * 2 / 3;
-      r += (20.0 * Math.sin(x * Math.PI) + 40.0 * Math.sin(x / 3.0 * Math.PI)) * 2 / 3;
-      r += (150.0 * Math.sin(x / 12.0 * Math.PI) + 300.0 * Math.sin(x / 30.0 * Math.PI)) * 2 / 3;
-      return r;
-    }
-    function tt(x, y) {
-      let r = -100.0 + 2.0 * x + 3.0 * y + 0.2 * y * y + 0.1 * x * y + 0.2 * Math.sqrt(Math.abs(x));
-      r += (20.0 * Math.sin(6.0 * x * Math.PI) + 20.0 * Math.sin(2.0 * x * Math.PI)) * 2 / 3;
-      r += (20.0 * Math.sin(y * Math.PI) + 40.0 * Math.sin(y / 3.0 * Math.PI)) * 2 / 3;
-      r += (160.0 * Math.sin(y / 12.0 * Math.PI) + 320.0 * Math.sin(y * Math.PI / 30.0)) * 2 / 3;
-      return r;
-    }
-    function gcjOf(lon, lat) {
-      const dx = tl(lon - 105.0, lat - 35.0), dy = tt(lon - 105.0, lat - 35.0);
-      const rad = lat / 180.0 * Math.PI;
-      const magic = 1 - EE * Math.sin(rad) * Math.sin(rad);
-      const sq = Math.sqrt(magic);
-      const dlat = (dy * 180.0) / ((A * (1 - EE)) / (magic * sq) * Math.PI);
-      const dlon = (dx * 180.0) / (A / sq * Math.cos(rad) * Math.PI);
-      return [lon + dlon, lat + dlat];
-    }
-    return function (lon, lat) {
-      let wx = lon, wy = lat;
-      for (let i = 0; i < 3; i++) {
-        const g = gcjOf(wx, wy);
-        wx += lon - g[0];
-        wy += lat - g[1];
-      }
-      return [wx, wy];
-    };
-  })();
+  /* gcj2wgs 已在文件顶部定义（渲染层要用），这里不再重复实现 */
 
   /* ① 坐标 + 实际步行通达（不是直线距离） */
   function accessRow(p) {
@@ -1136,7 +1260,8 @@
       const cg = Cesium.Cartographic.fromCartesian(cart);
       const lon = Cesium.Math.toDegrees(cg.longitude), lat = Cesium.Math.toDegrees(cg.latitude);
       el("hud-ll").textContent = `${lon.toFixed(5)}, ${lat.toFixed(5)}`;
-      const d = distMeters(lon, lat, 116.4074, 39.9042);
+      const b = baseLL();
+      const d = distMeters(lon, lat, b[0], b[1]);   // 参照点是数据里的基地，不是天安门
       el("hud-dist").textContent = `${(d / 1000).toFixed(1)} km`;
     }
   }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
@@ -1253,7 +1378,8 @@
     lat: (D.meta.center && D.meta.center[1]) || 40.0334
   };
   function setView(mode) {
-    const center = Cesium.Cartesian3.fromDegrees(CENTER.lon, CENTER.lat, 10);
+    const c = useWgs ? gcj2wgs(CENTER.lon, CENTER.lat) : [CENTER.lon, CENTER.lat];
+    const center = Cesium.Cartesian3.fromDegrees(c[0], c[1], 10);
     const cfg = {
       tilt:     { radius: 1150, pitch: -42, heading: 28 },
       top:      { radius: 2400, pitch: -89, heading: 0 },
@@ -1288,8 +1414,9 @@
           const p = hits.find((x) => x.n === d.dataset.k);
           sList.classList.remove("on");
           sInput.value = p.n;
+          const pc = llOf(p);
           viewer.camera.flyToBoundingSphere(
-            new Cesium.BoundingSphere(Cesium.Cartesian3.fromDegrees(p.x, p.y, 20), 340),
+            new Cesium.BoundingSphere(Cesium.Cartesian3.fromDegrees(pc[0], pc[1], 20), 340),
             { offset: new Cesium.HeadingPitchRange(0, Cesium.Math.toRadians(-42), 340), duration: 1.3 });
           renderDetail("poi", p);
         });
@@ -1320,8 +1447,9 @@
      ≥15 层提示可能有避难层（需现场确认）。平面路况好不等于高层能用。`,
     `<b>人本身</b>：勾「人群密度着色」按估算人口给建筑上色；小区出入口、地铁、学校单列一类。
      灾时最大的变量是人群流动，不是资源分布——撤离瓶颈常在出入口与楼梯。`,
-    `<b>底图与数据</b>：底图 © 高德（本机版）／OSM·Esri（公网版）；建筑轮廓、道路、POI 来自
-     OpenStreetMap contributors（Overpass API，ODbL 1.0），已整体从 WGS-84 转为 GCJ-02 对齐高德底图。`,
+    `<b>底图与坐标</b>：底图 © 高德（本机版）／OpenStreetMap contributors·Esri（公网版）；建筑轮廓、道路、
+     POI 来自 OpenStreetMap（Overpass API，ODbL 1.0），数据存的是 GCJ-02。<b>渲染时会按底图自动换算</b>：
+     高德系底图用 GCJ-02，OSM / Esri 用 WGS-84（GCJ-02 反解），两者相差约 550 m，换算错了整张图都会偏移。`,
     `<b>已知缺口</b>：OSM 在城区的 POI 与门牌覆盖不完整（楼号仅 ${D.pois.filter((p) => p.hn).length}/${D.pois.length} 个点位有），
      水厂泵站、AED、低洼洪水区等类别是<b>几何推算或类别推断</b>，不是实测。这不是一张可执行的图，是一张待现场核实的底稿。`
   ].map((s) => `<li>${s}</li>`).join("");
@@ -1336,6 +1464,7 @@
     const w = document.getElementById("file-warning");
     if (w) w.style.display = "block";
   }
+  geometryReady = true;   // 之后切换底图才会触发几何换算
   buildLegend();
   refreshVisibility();
   setView("tilt");

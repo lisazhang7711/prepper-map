@@ -5,12 +5,12 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>北苑生存资源三维图 · 公网静态版</title>
 <link rel="stylesheet" href="cesium/Widgets/widgets.css">
-<link rel="stylesheet" href="css/app.css?v=100">
+<link rel="stylesheet" href="css/app.css?v=101">
 <script>window.CESIUM_BASE_URL = 'cesium/';</script>
 </head>
 <body>
 
-<div id="file-warning" style="display:none">直接双击打开时浏览器会禁止加载地图瓦片（跨域限制）——请关闭本页，双击目录里的 <b>open-map.bat</b> 启动（会弹出一个黑色小窗口保持不关，然后自动打开地图）。</div>
+<div id="file-warning" style="display:none">你是用「双击文件」的方式打开本页的，浏览器会拦掉地图瓦片（跨域限制），地图会空白。请改用任意静态服务器访问本目录，例如在本目录执行 <b>python -m http.server 8000</b>，再打开 http://localhost:8000（或直接用 GitHub Pages 的在线地址）。</div>
 <div id="wrap">
 
   <!-- ============ 顶栏 ============ -->
@@ -91,7 +91,7 @@
           <label class="tg"><input type="checkbox" id="tg-leader" checked><span>资源点引线</span></label>
           <label class="tg"><input type="checkbox" id="tg-label" checked><span>资源点信息卡</span></label>
           <label class="tg"><input type="checkbox" id="tg-coord" checked><span>卡片显示经纬度</span></label>
-          <label class="tg"><input type="checkbox" id="tg-core" checked><span>只看宅边地块</span></label>
+          <label class="tg"><input type="checkbox" id="tg-core" checked><span>只看宅边地块（离建筑 50 m 内）</span></label>
         </div>
         <div class="slider-row">
           <span>底图浓度</span>
@@ -110,7 +110,7 @@
         </div>
         <div class="slider-row">
           <span>地块规模上限</span>
-          <input type="range" id="r-area" min="2000" max="120000" step="2000" value="20000">
+          <input type="range" id="r-area" min="2000" max="140000" step="2000" value="20000">
           <b id="v-area">2 万㎡</b>
         </div>
       </section>
@@ -161,8 +161,8 @@ window.addEventListener("error", function (e) {
 });
 </script>
 <script src="cesium/Cesium.js"></script>
-<script src="data/beiyuan.js?v=100"></script>
-<script src="js/crops.js?v=100"></script>
-<script src="js/app.js?v=100"></script>
+<script src="data/beiyuan.js?v=101"></script>
+<script src="js/crops.js?v=101"></script>
+<script src="js/app.js?v=101"></script>
 </body>
 </html>

@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <title>北苑生存资源地图 · 手机版</title>
-<link rel="stylesheet" href="css/app-mobile.css?v=202">
+<link rel="stylesheet" href="css/app-mobile.css?v=203">
 </head>
 <body>
 
@@ -22,8 +22,15 @@
   <div id="m-hits" class="m-hits" hidden></div>
 </header>
 
+<!-- 缩放按钮 -->
+<div id="m-zoom">
+  <button class="m-zb" id="m-zin" title="放大">＋</button>
+  <button class="m-zb" id="m-zout" title="缩小">－</button>
+</div>
+
 <!-- 右下浮动按钮 -->
 <div id="m-fabs">
+  <button id="m-guide" class="m-fab" title="使用说明">?</button>
   <button id="m-locate" class="m-fab" title="回到中心">◎</button>
   <button id="m-tilt" class="m-fab" title="立体/平面">3D</button>
   <button id="m-build" class="m-fab" title="建筑轮廓">▤</button>
@@ -45,6 +52,19 @@
 
 <div id="m-loading" class="m-loading">正在加载地图…</div>
 
+<!-- 首次使用引导 -->
+<div id="m-onboard" class="m-ob hidden">
+  <div class="m-ob-box">
+    <div class="m-ob-head"><b id="m-ob-t">这是什么</b><span id="m-ob-i">1 / 3</span></div>
+    <div id="m-ob-b" class="m-ob-body"></div>
+    <div class="m-ob-foot">
+      <button class="m-mini" id="m-ob-skip">跳过</button>
+      <span class="sp"></span>
+      <button class="m-mini primary" id="m-ob-next">下一步</button>
+    </div>
+  </div>
+</div>
+
 <script>
 window.__err = [];
 window.addEventListener("error", function (e) {
@@ -60,7 +80,7 @@ if (window.AMAP_KEY && window.AMAP_KEY.slice(0, 2) !== "__") {
     + encodeURIComponent(window.AMAP_KEY) + '"><\/script>');
 }
 </script>
-<script src="data/beiyuan.js?v=202"></script>
-<script src="js/app-mobile.js?v=202"></script>
+<script src="data/beiyuan.js?v=203"></script>
+<script src="js/app-mobile.js?v=203"></script>
 </body>
 </html>

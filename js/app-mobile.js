@@ -83,17 +83,62 @@
   const hidden = new Set(D.pois.filter((p) => p.c === "people").length > 30 ? ["people"] : []);
   let selected = null;
 
-  function pinEl(cat, isSel) {
+  /* 人群密度：与电脑版同口径 —— 当量人数折算 0-100 分，浅红人少 → 深红人多，点也更大 */
+  function peopleDens(p) {
+    if (p.sub === "metro") return 1200;
+    if (p.sub === "mall") return 1500;
+    if (p.sub === "school") {
+      const s = p.n || "";
+      if (/幼儿园|幼稚园/.test(s)) return 260;
+      if (/小学/.test(s)) return 900;
+      if (/中学|初中|高中/.test(s)) return 1600;
+      if (/大学|学院/.test(s)) return 1800;
+      if (/国际|双语/.test(s)) return 1100;
+      return 900;
+    }
+    let best = null, bd = 1e9;
+    (D.buildings || []).forEach((b) => {
+      if (b.cx == null || b.cy == null || !b.pop) return;
+      const dx = (b.cx - p.x) * 111320 * Math.cos(p.y * Math.PI / 180);
+      const dy = (b.cy - p.y) * 111320;
+      const d = Math.sqrt(dx * dx + dy * dy);
+      if (d < bd) { bd = d; best = b; }
+    });
+    if (best && bd <= 90) return best.pop;
+    const m = /地上\s*(\d+)\s*层/.exec(p.vt || "");
+    const lv = p.lv || (m ? +m[1] : 0);
+    return lv ? Math.round(lv * 4 * 2.8) : 160;
+  }
+  function densRate(n) {
+    return Math.max(0, Math.min(1,
+      (Math.log(Math.max(n, 30)) - Math.log(60)) / (Math.log(3000) - Math.log(60))));
+  }
+  function densCol(n) {
+    const s = Math.max(6, Math.min(100, Math.round(100 * densRate(n))));
+    if (s >= 82) return "#7f1d1d"; if (s >= 68) return "#991b1b";
+    if (s >= 55) return "#b91c1c"; if (s >= 42) return "#dc2626";
+    if (s >= 28) return "#ef4444"; if (s >= 16) return "#f87171";
+    return "#fca5a5";
+  }
+
+  function pinEl(cat, isSel, col, sc) {
     const el = document.createElement("div");
     el.className = "pm-pin" + (isSel ? " sel" : "");
-    el.style.setProperty("--pc", cat.color);
+    el.style.setProperty("--pc", col || cat.color);
+    if (sc != null && !isSel) {           /* 人越多点越大：24 ~ 32 px */
+      const w = Math.round(24 + 8 * sc);
+      el.style.width = el.style.height = w + "px";
+      el.style.lineHeight = (w - 4) + "px";
+      el.style.fontSize = (w >= 29 ? 15 : 13) + "px";
+    }
     el.textContent = cat.icon || "?";
     return el;
   }
 
   D.pois.forEach((p) => {
     const cat = CATS[p.c] || { color: "#64748b", icon: "?", zh: p.c };
-    const el = pinEl(cat, false);
+    const dn = p.c === "people" ? peopleDens(p) : null;
+    const el = pinEl(cat, false, dn ? densCol(dn) : null, dn ? densRate(dn) : null);
     const mk = new AMap.Marker({
       position: [p.x, p.y],
       content: el,
@@ -129,7 +174,8 @@
       if (!n) return;
       const d = document.createElement("div");
       d.className = "m-chip" + (hidden.has(k) ? " off" : "");
-      d.innerHTML = '<i style="background:' + cat.color + '"></i>' + cat.zh + " " + n;
+      const swg = (k === 'people') ? 'background:linear-gradient(135deg,#fca5a5,#7f1d1d)' : ('background:' + cat.color);
+      d.innerHTML = '<i style="' + swg + '"></i>' + cat.zh + " " + n;
       d.addEventListener("click", () => {
         if (hidden.has(k)) hidden.delete(k); else hidden.add(k);
         applyFilter();
@@ -175,7 +221,8 @@
       if (!n) return;
       const d = document.createElement("div");
       d.className = "m-lg" + (hidden.has(k) ? " off" : "");
-      d.innerHTML = '<i style="background:' + cat.color + '">' + cat.icon + '</i>'
+      const sw2 = (p.c === 'people') ? 'background:linear-gradient(135deg,#fca5a5,#7f1d1d)' : ('background:' + cat.color);
+    d.innerHTML = '<i style="' + sw2 + '">' + cat.icon + '</i>'
         + '<span class="ln">' + cat.zh + '</span><span class="lc">' + n + '</span>';
       d.addEventListener("click", () => {
         if (hidden.has(k)) hidden.delete(k); else hidden.add(k);

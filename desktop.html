@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>北苑生存资源地图 · 电脑版</title>
-<link rel="stylesheet" href="css/app.css?v=203">
+<link rel="stylesheet" href="css/app.css?v=204">
 </head>
 <body>
 
@@ -45,7 +45,6 @@
         <div id="search-list"></div>
       </div>
       <button id="btn-guide" class="btn">使用说明</button>
-      <button id="btn-key" class="btn ghost">配置 Key</button>
       <button id="btn-reset" class="btn ghost">重置视角</button>
       <button id="btn-switch" class="btn ghost">切换版本</button>
     </div>
@@ -160,8 +159,8 @@
       <div id="loading">正在加载地图…</div>
 
       <div id="netwarn" class="hidden">
-        地图引擎未能加载。本页依赖<b>高德地图 JS API</b>：需要联网，且必须配置一个 Web 端（JS API）Key。
-        点右上角「配置 Key」填入即可，Key 只保存在本机浏览器里。
+        地图引擎未能加载。本页依赖<b>高德地图 JS API</b>，需要联网。若持续无法加载，可在下方填入自己的
+        Web 端（JS API）Key，Key 只保存在本机浏览器里。
       </div>
 
       <div id="keypanel" class="hidden">
@@ -212,8 +211,8 @@ if (window.AMAP_KEY && window.AMAP_KEY.slice(0, 2) !== "__") {
     + encodeURIComponent(window.AMAP_KEY) + '"><\/script>');
 }
 </script>
-<script src="data/beiyuan.js?v=203"></script>
-<script src="js/crops.js?v=203"></script>
-<script src="js/app.js?v=203"></script>
+<script src="data/beiyuan.js?v=204"></script>
+<script src="js/crops.js?v=204"></script>
+<script src="js/app.js?v=204"></script>
 </body>
 </html>

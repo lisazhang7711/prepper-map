@@ -46,6 +46,71 @@
   const DEG_M = 111320;
 
   /* ==========================================================
+   * 人群密度估算（不同场所当量人数差一个量级，不能一个颜色画到底）
+   *   地铁出入口 > 学校 > 商场 > 小区出入口；出入口按就近楼栋的估算住户数取值。
+   *   折算成 0-100 分 -> 浅红(人少) → 深红(人多)，圆点半径也随分数变大。
+   * ========================================================== */
+  function meters(ax, ay, bx, by) {
+    const dx = (bx - ax) * DEG_M * Math.cos((ay + by) / 2 * Math.PI / 180);
+    const dy = (by - ay) * DEG_M;
+    return Math.sqrt(dx * dx + dy * dy);
+  }
+  function schoolSize(name) {
+    const n = name || "";
+    if (/幼儿园|幼稚园/.test(n)) return 260;
+    if (/小学/.test(n)) return 900;
+    if (/中学|初中|高中/.test(n)) return 1600;
+    if (/大学|学院/.test(n)) return 1800;
+    if (/国际|双语/.test(n)) return 1100;
+    return 900;
+  }
+  function peopleCount(p) {
+    if (p.sub === "metro") return 1200;   // 单个出入口的高峰小时客流当量
+    if (p.sub === "school") return schoolSize(p.n);
+    if (p.sub === "mall") return 1500;
+    /* 小区出入口：就近楼栋的估算住户数 */
+    let best = null, bd = 1e9;
+    (D.buildings || []).forEach((b) => {
+      if (b.cx == null || b.cy == null || !b.pop) return;
+      const d = meters(p.x, p.y, b.cx, b.cy);
+      if (d < bd) { bd = d; best = b; }
+    });
+    if (best && bd <= 90) return { n: best.pop, why: `就近楼栋估算住户（距 ${Math.round(bd)} m）` };
+    const m = /地上\s*(\d+)\s*层/.exec(p.vt || "");
+    const lv = p.lv || (m ? +m[1] : 0);
+    if (lv) return { n: Math.round(lv * 4 * 2.8), why: `按 ${lv} 层反推（每层约 4 户 × 2.8 人）` };
+    return { n: 160, why: "该点无层数/楼栋信息，取片区缺省值" };
+  }
+  function densScore(n) {
+    const s = 100 * (Math.log(Math.max(n, 30)) - Math.log(60)) / (Math.log(3000) - Math.log(60));
+    return Math.max(6, Math.min(100, Math.round(s)));
+  }
+  function densColor(s) {
+    if (s >= 82) return "#7f1d1d";
+    if (s >= 68) return "#991b1b";
+    if (s >= 55) return "#b91c1c";
+    if (s >= 42) return "#dc2626";
+    if (s >= 28) return "#ef4444";
+    if (s >= 16) return "#f87171";
+    return "#fca5a5";
+  }
+  function densText(s) {
+    return s >= 82 ? "极密集" : s >= 68 ? "很密集" : s >= 55 ? "密集" :
+           s >= 42 ? "中等偏密" : s >= 28 ? "中等" : s >= 16 ? "较稀疏" : "稀疏";
+  }
+  /* poi id -> { n, s, col, why }，只有 people 类有 */
+  const PD = {};
+  D.pois.forEach((p) => {
+    if (p.c !== "people") return;
+    const r = (p.sub === "metro") ? { n: 1200, why: "地铁站出入口，高峰小时客流当量" }
+            : (p.sub === "school") ? { n: schoolSize(p.n), why: "在校师生规模估算" }
+            : (p.sub === "mall") ? { n: 1500, why: "商场高峰客流当量" }
+            : peopleCount(p);
+    const s = densScore(r.n);
+    PD[p.i] = { n: r.n, s: s, col: densColor(s), why: r.why };
+  });
+
+  /* ==========================================================
    * 坐标基准
    * 底图是高德（GCJ-02），数据本身也是 GCJ-02 —— 两者一致，不需要任何换算。
    * ========================================================== */
@@ -254,10 +319,11 @@
 
   /* 高德风格 POI 卡片：左色块(外环=断电状态) + 名称 / 类别·断电·楼层 / 步行·坐标 */
   function makeCard(p, withCoord) {
-    const col = CATS[p.c].color;
+    const col = PD[p.i] ? PD[p.i].col : CATS[p.c].color;
     const pwCol = PW_COLOR[p.pw] || PW_COLOR.na;
     const l1 = (p.n && p.n !== "\u672a\u547d\u540d") ? p.n : CATS[p.c].zh + "\u70b9\u4f4d";
-    const l2 = CATS[p.c].zh + " · " + (PW_TEXT[p.pw] || "\u672a\u8bc4") + " · " + levelText(p);
+    const l2 = CATS[p.c].zh + " · " + (PW_TEXT[p.pw] || "\u672a\u8bc4") + " · " + levelText(p)
+      + (PD[p.i] ? " · \u4eba\u6d41" + densText(PD[p.i].s) : "");
     const w3src = [];
     if (p.d != null) w3src.push(walkText(p));
     if (withCoord) w3src.push(coordCouple(p));
@@ -302,7 +368,7 @@
     g.beginPath(); g.arc(PADX + DOT / 2, PADY + DOT / 2, DOT / 2, 0, Math.PI * 2);
     g.fillStyle = col; g.fill();
     g.font = "600 15px 'Segoe UI Symbol','PingFang SC',sans-serif";
-    g.fillStyle = p.c === "hardware" ? "#334155" : "#ffffff";
+    g.fillStyle = (p.c === "hardware" || (PD[p.i] && PD[p.i].s < 42)) ? "#7f1d1d" : "#ffffff";
     g.textAlign = "center"; g.textBaseline = "middle";
     g.fillText(CATS[p.c].icon, PADX + DOT / 2, PADY + DOT / 2 + 1);
 
@@ -333,20 +399,22 @@
   }
 
   /* 远景：只剩一个小圆点 */
-  function makeDot(color, icon, dark, pwCol) {
-    const S = 34, c = document.createElement("canvas");
+  /* sc = 0..1，决定圆点大小：人群点按密度分放大，人越多点越大 */
+  function makeDot(color, icon, dark, pwCol, sc) {
+    const r = 9 + 3.6 * (sc == null ? 0.5 : sc);
+    const S = Math.ceil(2 * (r + 3.6)), c = document.createElement("canvas");
     c.width = S * DPR; c.height = S * DPR;
     const g = c.getContext("2d");
     g.scale(DPR, DPR);
     if (pwCol) {
-      g.beginPath(); g.arc(S / 2, S / 2, 13.2, 0, Math.PI * 2);
+      g.beginPath(); g.arc(S / 2, S / 2, r + 2.7, 0, Math.PI * 2);
       g.lineWidth = 3; g.strokeStyle = pwCol; g.stroke();
     }
-    g.beginPath(); g.arc(S / 2, S / 2, 10.5, 0, Math.PI * 2);
+    g.beginPath(); g.arc(S / 2, S / 2, r, 0, Math.PI * 2);
     g.fillStyle = color; g.fill();
     g.lineWidth = 2.6; g.strokeStyle = "rgba(255,255,255,.98)"; g.stroke();
-    g.font = "600 12px 'Segoe UI Symbol','PingFang SC',sans-serif";
-    g.fillStyle = dark ? "#334155" : "#ffffff";
+    g.font = "600 " + (r > 11.5 ? 13 : 12) + "px 'Segoe UI Symbol','PingFang SC',sans-serif";
+    g.fillStyle = dark ? "#7f1d1d" : "#ffffff";
     g.textAlign = "center"; g.textBaseline = "middle";
     g.fillText(icon, S / 2, S / 2 + 0.5);
     return { img: c.toDataURL(), w: S, h: S };
@@ -357,8 +425,10 @@
     CARD[p.i] = {
       near: makeCard(p, true),
       nearNo: makeCard(p, false),
-      dot: makeDot(CATS[p.c].color, CATS[p.c].icon, p.c === "hardware",
-                   PW_COLOR[p.pw] || PW_COLOR.na)
+      dot: makeDot(PD[p.i] ? PD[p.i].col : CATS[p.c].color, CATS[p.c].icon,
+                   p.c === "hardware" || (PD[p.i] && PD[p.i].s < 42),
+                   PW_COLOR[p.pw] || PW_COLOR.na,
+                   PD[p.i] ? PD[p.i].s / 100 : 0.5)
     };
   });
 
@@ -659,13 +729,10 @@
   /* ==========================================================
    * 人群密度：建筑按估算人口着色（灾时最大变量是人群）
    * ========================================================== */
+  /* 与人群点统一口径：浅红=人少 → 深红=人多（人/公顷 800~4000 线性映射） */
   function popColor(ph) {
-    // 人/公顷 → 绿→黄→橙→红
-    if (ph >= 900) return "#b91c1c";
-    if (ph >= 600) return "#ea580c";
-    if (ph >= 350) return "#f59e0b";
-    if (ph >= 150) return "#84cc16";
-    return "#22c55e";
+    const s = Math.max(4, Math.min(100, Math.round(100 * ((ph || 0) - 800) / 3200)));
+    return densColor(s);
   }
   function applyPeople(on) {
     buildingEntities.forEach((poly) => {
@@ -783,8 +850,11 @@
       const div = document.createElement("div");
       div.className = "lg";
       div.dataset.cat = k;
+      const sw = (k === "people")
+        ? `background:linear-gradient(135deg,#fca5a5,#7f1d1d)`   // 人群按密度渐变：浅红人少→深红人多
+        : `background:${c.color}`;
       div.innerHTML =
-        `<span class="sw" style="background:${c.color}"></span>
+        `<span class="sw" style="${sw}"></span>
          <span class="tx"><span class="t1">${c.zh}</span><span class="t2">${CAT_DESC[k]}</span></span>
          <span class="ct">${n}</span>`;
       div.addEventListener("click", () => {
@@ -804,7 +874,7 @@
     hazard: "化工、监狱、油气储库——规划时绕行",
     strong: "高层酒店据点 / 建材加固物资",
     plot: "可种地（采光通风评分 + 作物产能）",
-    people: "出入口、地铁、学校——点很多，默认关闭",
+    people: "出入口、地铁、学校——颜色越深人越多，点越大人越多",
     // 旧版兜底
     supermarket: "主食 / 罐头 / 瓶装水集中点",
     medical2: "医院、门诊、药房与急救耗材",
@@ -1100,6 +1170,12 @@
     rows.push(["垂直维度", esc(p.vt || "无垂直信息")]);
     rows.push(["楼号 / 门牌", p.hn ? esc(p.hn) : "OSM 未标注（需现场核实）"]);
     rows.push(["类别", `${c.zh}${p.sub ? " · " + (SUB_ZH[p.sub] || p.sub) : ""}`]);
+    if (PD[p.i]) {
+      const d = PD[p.i];
+      rows.push(["人群密度",
+        `<b style="color:${d.col}">${densText(d.s)}</b>（${d.s}/100）　当量约 ${d.n} 人　` +
+        `<span style="color:#8b93a1">${esc(d.why)}</span>`]);
+    }
     rows.push(...llRows(p));
 
     const t = p.tags || {};
@@ -1195,7 +1271,7 @@
         <tr><td>高度</td><td>${b.h} m${b.e ? "（按类型估算，非实测）" : "（OSM 标注）"}</td></tr>
         <tr><td>楼号</td><td>${b.hn ? esc(b.hn) : "OSM 未标注"}</td></tr>
         ${b.pop != null ? `<tr><td>估算人口</td><td>约 ${b.pop} 人（建筑面积×层数÷32㎡/人，粗估）</td></tr>` : ""}
-        ${b.ph != null ? `<tr><td>人口密度</td><td>${b.ph} 人/公顷　${b.ph >= 600 ? "<b style=\"color:#b91c1c\">高密度·撤离拥堵风险</b>" : b.ph >= 350 ? "中高密度" : "低密度"}</td></tr>` : ""}
+        ${b.ph != null ? `<tr><td>人口密度</td><td>${b.ph} 人/公顷　<b style="color:${popColor(b.ph)}">${b.ph >= 3500 ? "极高·撤离拥堵风险" : b.ph >= 2500 ? "高密度" : b.ph >= 1600 ? "中高密度" : b.ph >= 800 ? "中等" : "低密度"}</b></td></tr>` : ""}
         ${b.lv ? `<tr><td>垂直维度</td><td>${b.lv >= 15 ? "≥15 层，按规范应设避难层（需现场确认）" : b.lv >= 8 ? "电梯停运后高层运补困难" : "多层，楼梯可达"}　屋顶约 ${Math.round(b.a)} ㎡可集雨</td></tr>` : ""}
         <tr><td>GCJ-02</td><td>${cy0.toFixed(6)}, ${cx0.toFixed(6)}</td></tr>
         ${wgs ? `<tr><td>WGS-84</td><td>N ${wgs[1].toFixed(6)}°　E ${wgs[0].toFixed(6)}°</td></tr>` : ""}

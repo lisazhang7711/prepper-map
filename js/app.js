@@ -49,8 +49,44 @@
    * 坐标基准
    * 底图是高德（GCJ-02），数据本身也是 GCJ-02 —— 两者一致，不需要任何换算。
    * ========================================================== */
-  function llOf(p) { return [p.x, p.y]; }
+  /* 手动位置校正
+   * OSM 是众包数据，点位偏几十米很常见（有的落在楼后、有的落在路口对面）。
+   * 用户可以在详情面板里「微调」把图标拖到实地位置，校正值只存本机 localStorage，
+   * 不改原始数据；点「恢复原始位置」即可撤销。 */
+  const FIX_KEY = "pm_fix";
+  const FIX = (function () {
+    try { return JSON.parse(localStorage.getItem(FIX_KEY) || "{}"); } catch (e) { return {}; }
+  })();
+  function saveFix() {
+    try { localStorage.setItem(FIX_KEY, JSON.stringify(FIX)); } catch (e) {}
+  }
+  function distM(a, b) {
+    const R = 6371000, r = Math.PI / 180;
+    const dLat = (b.y - a.y) * r, dLng = (b.x - a.x) * r;
+    const h = Math.sin(dLat / 2) ** 2
+      + Math.cos(a.y * r) * Math.cos(b.y * r) * Math.sin(dLng / 2) ** 2;
+    return 2 * R * Math.asin(Math.sqrt(h));
+  }
+
+  function llOf(p) {
+    const f = p && p.i ? FIX[p.i] : null;
+    return f ? [f.x, f.y] : [p.x, p.y];
+  }
   function ringOf(r) { return r; }
+
+  /* 极简提示条（本文件原本没有 toast，微调反馈要用） */
+  function toast(msg) {
+    let t = document.getElementById("pm-toast");
+    if (!t) {
+      t = document.createElement("div");
+      t.id = "pm-toast";
+      document.body.appendChild(t);
+    }
+    t.textContent = msg;
+    t.className = "show";
+    clearTimeout(t._h);
+    t._h = setTimeout(() => { t.className = ""; }, 2600);
+  }
 
   /* 基地（HUD「光标到基地」的参照点） */
   const BASE_GCJ = (function () {
@@ -368,6 +404,7 @@
   const poiEntities = [];
   const poiEntById = new Map();      // poi id -> marker
   const expandedIds = new Set();     // 已展开的点位 id
+  let adjustId = null;               // 当前处于「位置微调」状态的点位 id
 
   /* 折叠开关关掉 = 全部直接铺开信息卡 */
   function isExpanded(m) { return !state.fold || expandedIds.has(m.__pid); }
@@ -415,6 +452,21 @@
       m.__baseShow = true;
       props.set(m, { kind: "poi", data: p });
       m.on("click", () => onPoiClick(m));
+      /* 位置微调：常态不可拖，只有详情面板点了「微调」的那个点才接受拖动 */
+      m.on("dragend", () => {
+        if (adjustId !== p.i) return;
+        const pos = m.getPosition();
+        if (!pos) return;
+        const x = pos.getLng ? pos.getLng() : pos.lng;
+        const yy = pos.getLat ? pos.getLat() : pos.lat;
+        FIX[p.i] = { x: x, y: yy, ts: new Date().toISOString().slice(0, 10) };
+        saveFix();
+        adjustId = null;
+        m.setDraggable(false);
+        applyPoiIcon(m);
+        renderDetail("poi", p);
+        toast("已校正「" + (p.n || "该点") + "」，仅保存在本机");
+      });
       poiEntities.push(m);
       poiEntById.set(p.i, m);
       m.setMap(map);
@@ -956,6 +1008,46 @@
     return s;
   }
 
+  /* ⑦ 数据来源：给出可点开的原始记录，让每条结论都能自己核一遍 */
+  function srcRow(p) {
+    const ll = llOf(p);
+    let s = "";
+    const m = /^(node|way|relation)\/(\d+)$/.exec(p.i || "");
+    if (m) {
+      s += `<a class="src" href="https://www.openstreetmap.org/${m[1]}/${m[2]}" target="_blank" rel="noopener">`
+        + `在 OpenStreetMap 打开原始对象 ↗</a>`
+        + `<br><span class="sub">OSM ${m[1]} #${m[2]}　许可 ODbL 1.0　作者：OSM contributors</span><br>`;
+    }
+    s += `<a class="src" href="https://uri.amap.com/marker?position=${ll[0]},${ll[1]}`
+      + `&name=${encodeURIComponent(p.n || "")}&coordinate=gaode&callnative=0" target="_blank" rel="noopener">`
+      + `在高德地图核对这个位置 ↗</a>`;
+    s += `<br><span class="sub">快照：${esc(D.meta.generated || "—")}（Overpass API 抓取）　`
+      + `步行通达：${p.dsrc === "route" ? "OSRM 路网实测" : "直线 ×1.35 估算"}</span>`;
+    return s;
+  }
+
+  /* ⑧ 位置校正：偏了就拖一下，只改本机 */
+  function fixRow(p) {
+    const f = FIX[p.i];
+    if (!f) {
+      return `<button class="rpt-b" data-adjust="1">位置偏了？点这里微调</button>
+        <br><span class="sub">点后拖动地图上的图标到实地位置，松手即保存（只存在你这台设备）</span>`;
+    }
+    const dm = Math.round(distM({ x: p.x, y: p.y }, { x: f.x, y: f.y }));
+    return `<b style="color:#b45309">已手动校正</b>　偏移 ${dm} m
+      <br><span class="sub">GCJ-02 ${f.x.toFixed(6)}, ${f.y.toFixed(6)}　原始 ${p.x.toFixed(6)}, ${p.y.toFixed(6)}</span>
+      <div class="rpt"><button class="rpt-b" data-unfix="1">恢复原始位置</button></div>`;
+  }
+
+  function startAdjust(p) {
+    const m = poiEntById.get(p.i);
+    if (!m) return toast("地图上找不到这个点");
+    adjustId = p.i;
+    m.setDraggable(true);
+    try { map.setCenter(llOf(p)); map.setZoom(18); } catch (e) {}
+    toast("拖动地图上的图标到实地位置，松手即保存");
+  }
+
   function renderPOI(box, p) {
     const c = CATS[p.c];
     const pw = p.pw || "na";
@@ -971,6 +1063,8 @@
       `<b style="color:#b45309">${esc(p.vf || "—")}　未现场核实</b>
        <br><span class="sub">OSM 快照日期，非实地踏勘；用前需现场确认</span>`]);
     rows.push(["⑥ 数据核验", ckRow(p)]);
+    rows.push(["⑦ 数据来源", srcRow(p)]);
+    rows.push(["⑧ 位置校正", fixRow(p)]);
 
     /* 垂直维度 */
     rows.push(["楼层", levelFull(p)]);
@@ -999,6 +1093,17 @@
     box.className = "detail";
     box.innerHTML = html;
     bindReport(box, p);
+    const adj = box.querySelector("[data-adjust]");
+    if (adj) adj.addEventListener("click", () => startAdjust(p));
+    const unf = box.querySelector("[data-unfix]");
+    if (unf) unf.addEventListener("click", () => {
+      delete FIX[p.i];
+      saveFix();
+      const ent = poiEntById.get(p.i);
+      if (ent) { ent.setPosition([p.x, p.y]); applyPoiIcon(ent); }
+      renderDetail("poi", p);
+      toast("已恢复原始位置");
+    });
     box.querySelectorAll(".fb-link").forEach((a) => {
       a.addEventListener("click", () => {
         const key = a.dataset.fb;

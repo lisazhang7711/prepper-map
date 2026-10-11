@@ -75,15 +75,26 @@ html, body {
 #search-list small { color: var(--ink-3); margin-left: auto; }
 
 /* ---------------- 主体 ---------------- */
-#main { flex: 1 1 auto; display: flex; min-height: 0; }
+#main { flex: 1 1 auto; display: flex; min-height: 0; overflow: hidden; }
+
+/* 滚动条加粗上色，否则细到看不出侧栏是可以滚的 */
+#side::-webkit-scrollbar { width: 10px; }
+#side::-webkit-scrollbar-track { background: #eceef2; }
+#side::-webkit-scrollbar-thumb { background: #b9c0cc; border-radius: 6px; border: 2px solid #eceef2; }
+#side::-webkit-scrollbar-thumb:hover { background: #98a1b0; }
 
 #side {
-  flex: 0 0 var(--side-w); width: var(--side-w); overflow-y: auto;
+  flex: 0 0 var(--side-w); width: var(--side-w); height: 100%; max-height: 100%;
+  overflow-y: auto; overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior-y: contain;
   background: var(--bg); border-right: 1px solid var(--line); padding: 12px;
   display: flex; flex-direction: column; gap: 12px;
 }
+/* 关键：侧栏是纵向 flex 容器，面板默认 flex-shrink:1，容器高度一受限就被压扁，
+   内容再被 .panel{overflow:hidden} 裁掉 —— scrollHeight 永远等于 clientHeight，滚动条不出现。
+   必须让面板不收缩，多出来的高度才会变成可滚动区域。 */
+#side > * { flex: 0 0 auto; }
 .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
 .panel-h {
   display: flex; justify-content: space-between; align-items: center;

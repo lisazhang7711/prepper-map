@@ -99,7 +99,9 @@
   const el = (id) => document.getElementById(id);
 
   const state = {
-    hidden: new Set(),
+    /* 「人群」一类有 68 个点（占全部点位近一半），全是灰色图标，首屏铺得满满当当，
+       新用户根本看不出这张图在讲什么 —— 默认关掉，需要时在图例里点一下即可。 */
+    hidden: new Set(["people"]),
     minScore: 45,
     maxArea: 20000,
     coreOnly: true,
@@ -128,7 +130,7 @@
 
   const mapEl = el("amapContainer");
   const map = new AMap.Map("amapContainer", {
-    viewMode: "3D",
+    viewMode: "2D",             // 默认二维：三维倾斜视角会让新用户分不清方向
     zoom: 16,
     center: [CENTER.lon, CENTER.lat],
     pitch: 0,
@@ -140,33 +142,34 @@
     dragEnable: true,
     jogEnable: false,
     animateEnable: true,
-    zoomEnable: false,          // 滚轮缩放交给下面的灵敏度逻辑
-    doubleClickZoom: false,
-    keyboardEnable: false
+    zoomEnable: true,           // 滚轮 / 双击 / 触控板缩放全部交给高德原生
+    doubleClickZoom: true,
+    keyboardEnable: true,
+    scrollWheel: true,
+    touchZoom: true
   });
   window.__map = map;
 
-  /* ---------------- 鼠标灵敏度 ----------------
-   * 内置滚轮缩放关掉，自己按滑块节流：灵敏度越低，需要滚越多才升降一级。
-   * 平移由高德自带（1:1 跟手，不存在三维相机「一甩就飞」的问题）。 */
-  let wheelAcc = 0, wheelStep = 320;
-  function applyMouseSens(s) {
-    wheelStep = 110 / Math.max(0.15, s);   // 触发一级缩放所需的 deltaY 累计量
-  }
+  /* ---------------- 缩放控件 ----------------
+   * 之前把 zoomEnable 关掉、自己节流滚轮，结果「滚半天才动一级」，用户以为缩放坏了。
+   * 现在恢复原生缩放，再补一组显眼的 +/- 按钮和缩放级别显示。 */
   function zoomBy(dir) {
     const z = map.getZoom();
     map.setZoom(Math.min(20, Math.max(3, Math.round((z + dir * 0.5) * 2) / 2)));
   }
-  mapEl.addEventListener("wheel", (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    wheelAcc += e.deltaY;
-    if (Math.abs(wheelAcc) < wheelStep) return;
-    const dir = wheelAcc > 0 ? -1 : 1;
-    wheelAcc = 0;
-    zoomBy(dir);
-  }, { passive: false, capture: true });
-  map.on("dblclick", () => zoomBy(2));
+  function applyMouseSens() { /* 保留函数名以兼容旧调用，灵敏度现在由高德原生处理 */ }
+  (function addZoomControls() {
+    const bar = document.createElement("div");
+    bar.className = "zoombar";
+    bar.innerHTML =
+      '<button class="zb" id="zb-in" title="放大">＋</button>' +
+      '<button class="zb" id="zb-out" title="缩小">－</button>' +
+      '<button class="zb zb-fit" id="zb-fit" title="回到片区全景">⤢</button>';
+    el("map").appendChild(bar);
+    el("zb-in").addEventListener("click", () => zoomBy(1));
+    el("zb-out").addEventListener("click", () => zoomBy(-1));
+    el("zb-fit").addEventListener("click", () => setView("top"));
+  })();
 
   /* ---------------- 底图 ---------------- */
   let satLayer = null, roadNetLayer = null;
@@ -745,6 +748,32 @@
   function buildLegend() {
     const box = el("legend");
     box.innerHTML = "";
+
+    /* 九个图层挤成一列时，一屏只看得到前三项（水／食物／医疗）——被测用户以为
+       只能筛这三类。改成两列网格一屏铺满，并给一组一键筛选按钮。 */
+    if (!document.getElementById("lg-tools")) {
+      const tools = document.createElement("div");
+      tools.id = "lg-tools";
+      tools.className = "lg-tools";
+      tools.innerHTML =
+        '<button class="mini-btn" data-act="all">全部显示</button>' +
+        '<button class="mini-btn" data-act="core">只看生存必需</button>' +
+        '<button class="mini-btn" data-act="none">全部隐藏</button>';
+      box.parentNode.insertBefore(tools, box.nextSibling);
+      tools.addEventListener("click", (e) => {
+        const b = e.target.closest("button");
+        if (!b) return;
+        const act = b.dataset.act;
+        if (act === "all") state.hidden.clear();
+        else if (act === "none") CAT_ORDER.forEach((k) => state.hidden.add(k));
+        else {   /* 生存必需：水 / 食物 / 医疗 / 能源通信 / 据点 */
+          CAT_ORDER.forEach((k) => state.hidden.add(k));
+          ["water", "food", "medical", "energy", "strong"].forEach((k) => state.hidden.delete(k));
+        }
+        refreshVisibility();
+      });
+    }
+
     CAT_ORDER.forEach((k) => {
       const c = CATS[k];
       /* 地块不在 D.pois 里，单独取，否则图例永远显示 0 */
@@ -775,7 +804,7 @@
     hazard: "化工、监狱、油气储库——规划时绕行",
     strong: "高层酒店据点 / 建材加固物资",
     plot: "可种地（采光通风评分 + 作物产能）",
-    people: "出入口、地铁、学校——人群流动变量",
+    people: "出入口、地铁、学校——点很多，默认关闭",
     // 旧版兜底
     supermarket: "主食 / 罐头 / 瓶装水集中点",
     medical2: "医院、门诊、药房与急救耗材",
@@ -1437,11 +1466,14 @@
     state.fold = e.target.checked;      // 勾上 = 默认折叠，只有点开的才展开
     refreshPOIStyle();
   });
-  el("r-sens").addEventListener("input", (e) => {
-    state.sens = parseFloat(e.target.value) / 100;
-    el("v-sens").textContent = Math.round(state.sens * 100) + "%";
-    applyMouseSens(state.sens);
-  });
+  /* 灵敏度滑块已移除（原生缩放后不需要），这里做空值保护以便旧页面也能跑 */
+  if (el("r-sens")) {
+    el("r-sens").addEventListener("input", (e) => {
+      state.sens = parseFloat(e.target.value) / 100;
+      el("v-sens").textContent = Math.round(state.sens * 100) + "%";
+      applyMouseSens(state.sens);
+    });
+  }
   el("btn-fold-all").addEventListener("click", collapseAll);
   el("btn-unfold-all").addEventListener("click", expandAll);
   el("btn-key").addEventListener("click", () => {
@@ -1496,14 +1528,14 @@
   el("viewmode").addEventListener("change", (e) => setView(e.target.value));
 
   /* ---------------- 视角 ---------------- */
+  /* 二维模式不支持 pitch，四档全是正射俯视，只改级别 */
   function setView(mode) {
     const cfg = {
-      street:   { zoom: 18,   pitch: 0  },
-      tilt:     { zoom: 16.5, pitch: 45 },
-      top:      { zoom: 15.5, pitch: 0  },
-      district: { zoom: 13.5, pitch: 0  }
-    }[mode] || { zoom: 16.5, pitch: 45 };
-    map.setPitch(cfg.pitch);
+      street:   { zoom: 18   },   // 街区贴近
+      normal:   { zoom: 16.5 },   // 标准俯视
+      top:      { zoom: 15.5 },   // 片区全景（默认）
+      district: { zoom: 13.5 }    // 周边地区
+    }[mode] || { zoom: 15.5 };
     map.setZoomAndCenter(cfg.zoom, [CENTER.lon, CENTER.lat]);
   }
 
@@ -1573,8 +1605,64 @@
     `${(D.roads || []).length} 条撤离道路 / ${(D.chokes || []).length} 个桥隧卡点 / ` +
     `${D.buildings.length} 栋建筑`;
 
+  /* ==========================================================
+   * 首次使用引导
+   * 被测用户（含录屏）反馈：打开后「不知道这是个什么东西」「不知道咋弄」。
+   * 首屏自动弹四步说明，看过一次不再弹；顶栏「使用说明」可随时重开。
+   * ========================================================== */
+  const OB_STEPS = [
+    { t: "这是什么",
+      h: `<p>北苑片区的<b>生存资源底稿</b>：水、食物、医疗、能源通信、撤离路线、危险源、据点、
+           可种地共 <b>8 类资源点位</b>，外加灰色建筑轮廓与紫色候选地块。</p>
+          <p class="ob-warn">它<b>不是可执行地图</b>——数据来自 OpenStreetMap 众包，
+             <b>无一处经过实地踏勘</b>。做任何实地决策前必须现场核实。</p>` },
+    { t: "怎么看一个点",
+      h: `<p>地图上每个点默认只显示<b>一枚单字图标</b>（水／食／医／电／撤／危／住／种）。
+             <b>点一下</b>展开它的信息卡，再点一下收起。</p>
+          <p>信息卡里有：步行距离与用时、断电后能不能用、容量量级、最近的备用点、
+             OSM 原始对象链接（可自己核查）。</p>
+          <p>紫色多边形是<b>候选地块</b>，点它看采光评分、面积与作物产能。</p>` },
+    { t: "怎么筛",
+      h: `<p>左侧<b>资源图层</b>里点任意一行即可开关该图层；下面的
+             <b>「只看生存必需」</b>一键只留水／食物／医疗／能源／据点。</p>
+          <p><b>「人群」一类有 68 个灰点、占了全图近一半，默认关闭</b>，需要时点开。</p>
+          <p>「断电可用性筛选」勾上后只剩断电后仍能用的点位——这一刀通常砍掉一半。</p>` },
+    { t: "怎么移动",
+      h: `<p>滚轮 / 双击 = 缩放，按住拖动 = 平移，右下角 <b>＋ －</b> 也能缩放。</p>
+          <p>迷路了点右上角<b>「重置视角」</b>回到片区全景。</p>
+          <p>随时点顶栏<b>「使用说明」</b>重新打开这段说明。</p>` }
+  ];
+  let obIdx = 0;
+  function obRender() {
+    const s = OB_STEPS[obIdx];
+    el("ob-title").textContent = s.t;
+    el("ob-idx").textContent = (obIdx + 1) + " / " + OB_STEPS.length;
+    el("ob-body").innerHTML = s.h;
+    el("ob-prev").style.visibility = obIdx === 0 ? "hidden" : "visible";
+    el("ob-next").textContent = obIdx === OB_STEPS.length - 1 ? "开始使用" : "下一步";
+  }
+  function obOpen() { obIdx = 0; obRender(); el("onboard").classList.remove("hidden"); }
+  function obClose() {
+    el("onboard").classList.add("hidden");
+    try { localStorage.setItem("pm_onboarded", "1"); } catch (e) {}
+  }
+  function bindOnboard() {
+    el("ob-next").addEventListener("click", () => {
+      if (obIdx >= OB_STEPS.length - 1) return obClose();
+      obIdx++; obRender();
+    });
+    el("ob-prev").addEventListener("click", () => { if (obIdx > 0) { obIdx--; obRender(); } });
+    el("ob-skip").addEventListener("click", obClose);
+    el("btn-guide").addEventListener("click", obOpen);
+    el("onboard").addEventListener("click", (e) => { if (e.target.id === "onboard") obClose(); });
+    let seen = null;
+    try { seen = localStorage.getItem("pm_onboarded"); } catch (e) {}
+    if (!seen) obOpen();
+  }
+
   /* ---------------- 启动 ---------------- */
   bindKeyPanel();
+  bindOnboard();
   if (location.protocol === "file:") {
     const w = document.getElementById("file-warning");
     if (w) w.style.display = "block";

@@ -221,7 +221,7 @@
       if (!n) return;
       const d = document.createElement("div");
       d.className = "m-lg" + (hidden.has(k) ? " off" : "");
-      const sw2 = (p.c === 'people') ? 'background:linear-gradient(135deg,#fca5a5,#7f1d1d)' : ('background:' + cat.color);
+      const sw2 = (k === 'people') ? 'background:linear-gradient(135deg,#fca5a5,#7f1d1d)' : ('background:' + cat.color);
     d.innerHTML = '<i style="' + sw2 + '">' + cat.icon + '</i>'
         + '<span class="ln">' + cat.zh + '</span><span class="lc">' + n + '</span>';
       d.addEventListener("click", () => {

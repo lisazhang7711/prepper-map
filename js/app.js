@@ -1476,15 +1476,6 @@
   }
   el("btn-fold-all").addEventListener("click", collapseAll);
   el("btn-unfold-all").addEventListener("click", expandAll);
-  el("btn-key").addEventListener("click", () => {
-    el("keypanel").classList.remove("hidden");
-    const i = el("key-input");
-    if (i && !i.value) {
-      try { i.value = (localStorage.getItem("amap_key") || "").trim(); } catch (err) {}
-    }
-    if (i) i.focus();
-  });
-
   el("tg-core").addEventListener("change", (e) => {
     state.coreOnly = e.target.checked;
     refreshVisibility();

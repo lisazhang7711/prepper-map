@@ -79,7 +79,8 @@
 
   /* ---------------- 资源点图标 ---------------- */
   const items = [];               // { p, mk, el }
-  const hidden = new Set();       // 被关掉的类别
+  /* 「人群」一类有 68 个灰点、占全图近一半，首屏看不出重点 —— 默认关闭 */
+  const hidden = new Set(D.pois.filter((p) => p.c === "people").length > 30 ? ["people"] : []);
   let selected = null;
 
   function pinEl(cat, isSel) {
@@ -370,6 +371,56 @@
       staleBtn.classList.toggle("on", hideStale);
       applyFilter();
     });
+  }
+
+  /* ---------------- 缩放按钮 ---------------- */
+  const zin = document.getElementById("m-zin"), zout = document.getElementById("m-zout");
+  if (zin) zin.addEventListener("click", () => map.setZoom(Math.min(19, map.getZoom() + 1)));
+  if (zout) zout.addEventListener("click", () => map.setZoom(Math.max(12, map.getZoom() - 1)));
+
+  /* ---------------- 首次使用引导 ----------------
+   * 录屏用户反馈：打开后不知道这是个什么东西，得自己摸索。首屏三步说明。 */
+  const MOB_STEPS = [
+    { t: "这是什么",
+      h: "<p>北苑片区的<b>生存资源底稿</b>：水、食物、医疗、能源通信、撤离路线、"
+       + "危险源、据点、可种地，共 8 类点位。</p>"
+       + "<p class='m-ob-warn'>它<b>不是可执行地图</b>——数据来自 OpenStreetMap 众包，"
+       + "无一经过实地踏勘，实地决策前必须现场核实。</p>" },
+    { t: "怎么看一个点",
+      h: "<p>地图上每个点是一枚<b>单字图标</b>（水／食／医／电／撤／危／住／种），"
+       + "<b>点一下</b>看详情，详情在底部抽屉里，往上拖可展开。</p>"
+       + "<p>底部<b>图例</b>可开关类别；「人群」一类点太多，默认关闭。</p>" },
+    { t: "怎么移动",
+      h: "<p>双指捏合或右侧 <b>＋ －</b> 缩放，单指拖动平移。</p>"
+       + "<p>迷路了点 <b>◎</b> 回到片区中心，点 <b>?</b> 可重看本说明。</p>" }
+  ];
+  let mobIdx = 0;
+  const obEl = document.getElementById("m-onboard");
+  function mobRender() {
+    const s = MOB_STEPS[mobIdx];
+    document.getElementById("m-ob-t").textContent = s.t;
+    document.getElementById("m-ob-i").textContent = (mobIdx + 1) + " / " + MOB_STEPS.length;
+    document.getElementById("m-ob-b").innerHTML = s.h;
+    document.getElementById("m-ob-next").textContent =
+      mobIdx === MOB_STEPS.length - 1 ? "开始使用" : "下一步";
+  }
+  function mobOpen() { mobIdx = 0; mobRender(); obEl.classList.remove("hidden"); }
+  function mobClose() {
+    obEl.classList.add("hidden");
+    try { localStorage.setItem("pm_onboarded_m", "1"); } catch (e) {}
+  }
+  if (obEl) {
+    document.getElementById("m-ob-next").addEventListener("click", () => {
+      if (mobIdx >= MOB_STEPS.length - 1) return mobClose();
+      mobIdx++; mobRender();
+    });
+    document.getElementById("m-ob-skip").addEventListener("click", mobClose);
+    obEl.addEventListener("click", (e) => { if (e.target === obEl) mobClose(); });
+    const gb = document.getElementById("m-guide");
+    if (gb) gb.addEventListener("click", mobOpen);
+    let seen = null;
+    try { seen = localStorage.getItem("pm_onboarded_m"); } catch (e) {}
+    if (!seen) mobOpen();
   }
 
   /* ---------------- 启动 ---------------- */

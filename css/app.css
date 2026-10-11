@@ -44,7 +44,11 @@ html, body {
 #topbar h1 { margin: 0; font-size: 15px; font-weight: 650; letter-spacing: .2px; }
 #topbar p  { margin: 1px 0 0; font-size: 11.5px; color: var(--ink-3); }
 
-.top-tools { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+/* 顶栏一行排到底：搜索框可压缩（不撑开），按钮不折行，「切换版本」用 margin-left:auto 顶到最右 */
+.top-tools { display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; margin-left: auto; }
+.top-tools > .sel, .top-tools > .btn { flex: 0 0 auto; white-space: nowrap; }
+.top-tools .searchbox { flex: 0 1 220px; min-width: 110px; }
+#btn-switch { margin-left: auto; }
 .sel { font-size: 12px; color: var(--ink-3); display: flex; align-items: center; gap: 6px; }
 .sel select {
   font: inherit; color: var(--ink); padding: 5px 8px; border-radius: 7px;
@@ -59,7 +63,7 @@ html, body {
 
 .searchbox { position: relative; }
 .searchbox input {
-  width: 220px; font: inherit; padding: 6px 10px; border-radius: 7px;
+  width: 100%; font: inherit; padding: 6px 10px; border-radius: 7px;
   border: 1px solid var(--line); background: #fff; outline: none;
 }
 .searchbox input:focus { border-color: var(--accent); }

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>北苑生存资源地图 · 电脑版</title>
-<link rel="stylesheet" href="css/app.css?v=202">
+<link rel="stylesheet" href="css/app.css?v=203">
 </head>
 <body>
 
@@ -35,8 +35,8 @@
         视角
         <select id="viewmode">
           <option value="street">街区贴近</option>
-          <option value="tilt">倾斜俯瞰</option>
-          <option value="top">正射俯视</option>
+          <option value="normal">标准俯视</option>
+          <option value="top">片区全景</option>
           <option value="district">周边地区概览</option>
         </select>
       </label>
@@ -44,6 +44,7 @@
         <input id="search" placeholder="搜索资源点，例如 加油站 / 酒店" autocomplete="off">
         <div id="search-list"></div>
       </div>
+      <button id="btn-guide" class="btn">使用说明</button>
       <button id="btn-key" class="btn ghost">配置 Key</button>
       <button id="btn-reset" class="btn ghost">重置视角</button>
       <button id="btn-switch" class="btn ghost">切换版本</button>
@@ -105,11 +106,8 @@
           <input type="range" id="r-dim" min="0.08" max="1" step="0.02" value="1">
           <b id="v-dim">100%</b>
         </div>
-        <div class="slider-row">
-          <span>鼠标灵敏度</span>
-          <input type="range" id="r-sens" min="15" max="120" step="5" value="35">
-          <b id="v-sens">35%</b>
-        </div>
+        <p class="note">缩放：滚轮 / 双击放大，拖动平移；也可用地图右下角的 <b>＋ －</b> 按钮，
+          右上角「重置视角」回到片区全景。</p>
         <div class="btn-row">
           <button id="btn-fold-all" class="btn ghost">全部收起</button>
           <button id="btn-unfold-all" class="btn ghost">全部展开</button>
@@ -177,6 +175,23 @@
           </div>
         </div>
       </div>
+
+      <!-- ============ 首次使用引导 ============ -->
+      <div id="onboard" class="hidden">
+        <div class="ob-box">
+          <div class="ob-head">
+            <b id="ob-title">这是什么</b>
+            <span id="ob-idx">1 / 4</span>
+          </div>
+          <div class="ob-body" id="ob-body"></div>
+          <div class="ob-foot">
+            <button class="btn ghost" id="ob-skip">跳过</button>
+            <span class="ob-spacer"></span>
+            <button class="btn ghost" id="ob-prev">上一步</button>
+            <button class="btn" id="ob-next">下一步</button>
+          </div>
+        </div>
+      </div>
     </div>
   </main>
 </div>
@@ -197,8 +212,8 @@ if (window.AMAP_KEY && window.AMAP_KEY.slice(0, 2) !== "__") {
     + encodeURIComponent(window.AMAP_KEY) + '"><\/script>');
 }
 </script>
-<script src="data/beiyuan.js?v=202"></script>
-<script src="js/crops.js?v=202"></script>
-<script src="js/app.js?v=202"></script>
+<script src="data/beiyuan.js?v=203"></script>
+<script src="js/crops.js?v=203"></script>
+<script src="js/app.js?v=203"></script>
 </body>
 </html>

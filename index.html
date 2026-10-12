@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>北苑生存资源地图 · 设备选择</title>
-<link rel="stylesheet" href="css/app.css?v=205">
+<link rel="stylesheet" href="css/app.css?v=206">
 <style>
   html, body { height: 100%; margin: 0; }
   body {
@@ -38,6 +38,19 @@
   }
   .card.m .ico { background: linear-gradient(135deg,#e0f2fe,#bfdbfe); }
   .card.d .ico { background: linear-gradient(135deg,#ede9fe,#e0e7ff); }
+  .card.d {
+    border-color: #c9d6f5;
+    box-shadow: 0 2px 14px rgba(31,111,235,.10);
+  }
+  .card.d:hover { border-color: #93b4f7; box-shadow: 0 16px 36px rgba(31,111,235,.18); }
+  .card { position: relative; }
+  .card .badge-rec {
+    position: absolute; top: 16px; right: 18px;
+    font-size: 11.5px; font-weight: 700; letter-spacing: .5px; color: #fff;
+    background: linear-gradient(135deg, #f59e0b 0%, #ef4444 100%);
+    border-radius: 999px; padding: 4px 11px;
+    box-shadow: 0 4px 12px rgba(239,68,68,.26);
+  }
   .card h2 { margin: 0 0 6px; font-size: 17px; font-weight: 680; }
   .card p  { margin: 0; font-size: 13px; color: #5b6472; line-height: 1.65; }
   .card .tag {
@@ -54,7 +67,7 @@
 <div class="entry">
   <div class="logo"></div>
   <h1>北苑片区 · 生存资源地图</h1>
-  <p class="sub">请先选择你的设备，我们会加载对应的界面</p>
+  <p class="sub">请选择你的设备，我们会加载对应的界面　·　首次使用建议选电脑版</p>
   <p class="meta" id="meta-line">DEMO — 数据来自 OpenStreetMap ｜ 底图 © 高德地图</p>
 
   <div class="cards">
@@ -62,13 +75,14 @@
       <div class="ico">📱</div>
       <h2>手机版</h2>
       <p>全屏二维地图（类似苹果地图），底部抽屉看详情。<br>图标更稀疏、不遮挡地图，单手可操作。</p>
-      <span class="tag">推荐手机 / 平板竖屏</span>
+      <span class="tag">适合手机 / 平板竖屏</span>
     </div>
     <div class="card d" data-go="desktop.html">
+      <span class="badge-rec">推荐</span>
       <div class="ico">🖥️</div>
       <h2>电脑版</h2>
       <p>左侧完整控制面板：图层筛选、断电可用性、候选地块、统计。<br>适合大屏仔细分析。</p>
-      <span class="tag">推荐笔记本 / 台式机</span>
+      <span class="tag">功能最全 · 笔记本 / 台式机</span>
     </div>
   </div>
 
@@ -76,7 +90,7 @@
   <div class="foot">随时可在页面里点「切换版本」重新选择</div>
 </div>
 
-<script src="data/beiyuan.js?v=205"></script>
+<script src="data/beiyuan.js?v=206"></script>
 <script>
 (function () {
   var SAVED = null;
@@ -101,11 +115,9 @@
   });
 })();
 </script>
-<!-- ===== 站点统计埋点 ===== -->
 <script>
 (function(){
-  var U = 'https://itkjrodrzenefmxsyrnx.supabase.co';
-  var A = 'sb_publishable_Tfq41bRCMvAVZYgYuEJe9g_RkrFKQZB';
+  var B = '__STATS_BACKEND__';
   var S = 'prepper-map';
   var K = 'st_vid';
   var vid = '';
@@ -113,60 +125,25 @@
     vid = localStorage.getItem(K) || '';
     if (!vid) {
       vid = (crypto && crypto.randomUUID)
-        ? crypto.randomUUID().replace(/-/g, '')
+        ? crypto.randomUUID()
         : 'v' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
       localStorage.setItem(K, vid);
     }
   } catch (e) { vid = ''; }
   if (!vid) return;
-
-  var P = 'st_dev';
-  function day8() {
-    var d = new Date(Date.now() + 8 * 3600000);
-    return d.getUTCFullYear() + '-' +
-           String(d.getUTCMonth() + 1).padStart(2, '0') + '-' +
-           String(d.getUTCDate()).padStart(2, '0');
-  }
-  function profile(day) {
-    var o = {};
-    try { o = JSON.parse(localStorage.getItem(P) || '{}'); } catch (e) {}
-    o.n = (o.n || 0) + 1;
-    o.s = o.s || {}; o.s[S] = (o.s[S] || 0) + 1;
-    o.d = o.d || []; if (o.d.indexOf(day) < 0) o.d.push(day); o.d.sort();
-    o.w = o.w || 0;
-    o.fd = o.fd || day;
-    try { localStorage.setItem(P, JSON.stringify(o)); } catch (e) {}
-    return o;
-  }
-  function post(body) {
+  var t0 = Date.now(), done = false;
+  function send(extra) {
     try {
-      fetch(U + '/rest/v1/rpc/report', {
-        method: 'POST',
-        headers: { 'apikey': A, 'Authorization': 'Bearer ' + A,
-                   'Content-Type': 'application/json' },
-        body: JSON.stringify(body), keepalive: true
-      }).catch(function(){});
+      var u = B + '/hit?site=' + S + '&vid=' + encodeURIComponent(vid) + (extra || '');
+      if (navigator.sendBeacon) navigator.sendBeacon(u);
+      else fetch(u, { mode: 'no-cors', keepalive: true }).catch(function(){});
     } catch (e) {}
   }
-
-  var t0 = Date.now(), left = false;
-  var day = day8(), dev = profile(day);
-  post({ p_site: S, p_vid: vid, p_day: day, p_cnt: 1, p_dev: dev });
-
-  function leave() {
-    if (left) return; left = true;
-    var sec = Math.round((Date.now() - t0) / 1000);
-    if (sec < 0) sec = 0;
-    if (sec > 3600) sec = 3600;
-    dev.w = (dev.w || 0) + sec;
-    try { localStorage.setItem(P, JSON.stringify(dev)); } catch (e) {}
-    post({ p_site: S, p_vid: vid, p_day: day, p_cnt: 0, p_dev: dev, p_dwell: sec });
-  }
+  function leave() { if (done) return; done = true; send('&dwell=' + Math.round((Date.now() - t0) / 1000)); }
+  send('');
   addEventListener('pagehide', leave);
   addEventListener('beforeunload', leave);
-  document.addEventListener('visibilitychange', function () {
-    if (document.visibilityState === 'hidden') leave();
-  });
+  document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'hidden') leave(); });
 })();
 </script>
 

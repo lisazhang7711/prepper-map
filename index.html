@@ -4,63 +4,62 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>北苑生存资源地图 · 设备选择</title>
-<link rel="stylesheet" href="css/app.css?v=208">
+<link rel="stylesheet" href="css/app.css?v=209">
 <style>
   html, body { height: 100%; margin: 0; }
   body {
-    background: radial-gradient(1200px 700px at 20% -10%, #eef2ff 0%, #f7f8fa 45%, #f2f4f7 100%);
+    background: radial-gradient(1200px 700px at 20% -10%, #f6efdc 0%, #f0e7ce 55%, #eadfc2 100%);
     display: flex; align-items: center; justify-content: center;
     font-family: "PingFang SC", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
-    color: #1b1f26;
+    color: #211f1a;
     -webkit-font-smoothing: antialiased;
   }
   .entry { width: min(920px, 92vw); text-align: center; padding: 24px 0 40px; }
   .entry .logo {
     width: 54px; height: 54px; border-radius: 15px; margin: 0 auto 16px;
-    background: linear-gradient(135deg, #1f6feb 0%, #9B45D0 55%, #E5342B 100%);
-    box-shadow: 0 8px 22px rgba(31,111,235,.28);
+    background: #963422;
+    box-shadow: 0 8px 22px rgba(150,52,34,.28);
   }
-  .entry h1 { margin: 0 0 6px; font-size: 24px; font-weight: 700; letter-spacing: .3px; }
-  .entry .sub { margin: 0 0 4px; font-size: 13.5px; color: #5b6472; }
-  .entry .meta { font-size: 12px; color: #8b93a1; margin-bottom: 28px; }
-  .cards { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  .entry h1 { margin: 0 0 6px; font-size: 24px; font-weight: 700; letter-spacing: .3px; color: #211f1a; }
+  .entry .sub { margin: 0 0 4px; font-size: 13.5px; color: #6b6455; }
+  .entry .meta { font-size: 12px; color: #8d8574; margin-bottom: 28px; }
+  .cards { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
   @media (max-width: 720px) { .cards { grid-template-columns: 1fr; gap: 14px; } }
   .card {
-    background: #fff; border: 1px solid #e6e9ef; border-radius: 16px;
-    padding: 26px 22px; cursor: pointer; text-align: left;
+    background: #f7f1e0; border: 2px solid #cbbc97; border-radius: 18px;
+    padding: 30px 22px; cursor: pointer; text-align: center;
     transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
-    box-shadow: 0 2px 10px rgba(27,31,38,.05);
+    box-shadow: 0 2px 10px rgba(90,70,30,.06);
   }
-  .card:hover { transform: translateY(-3px); box-shadow: 0 14px 32px rgba(27,31,38,.12); border-color: #c9d6f5; }
+  .card:hover { transform: translateY(-3px); box-shadow: 0 14px 32px rgba(90,70,30,.14); }
   .card .ico {
-    width: 44px; height: 44px; border-radius: 12px; display: flex; align-items: center; justify-content: center;
-    font-size: 22px; margin-bottom: 14px;
+    width: 56px; height: 56px; border-radius: 14px; display: flex; align-items: center; justify-content: center;
+    font-size: 32px; margin: 0 auto 16px; background: transparent;
   }
-  .card.m .ico { background: linear-gradient(135deg,#e0f2fe,#bfdbfe); }
-  .card.d .ico { background: linear-gradient(135deg,#ede9fe,#e0e7ff); }
   .card.d {
     position: relative;
-    border: 1px solid #9f1239;                 /* 暗红细边，围住整张电脑版卡片 */
-    box-shadow: 0 2px 14px rgba(159,18,57,.10);
-    padding-bottom: 50px;                       /* 给底部居中的徽章腾位置 */
+    border: 2px solid #963422;
+    box-shadow: 0 2px 14px rgba(150,52,34,.12);
+    padding-bottom: 54px;
   }
-  .card.d:hover { border-color: #881337; box-shadow: 0 16px 36px rgba(159,18,57,.18); }
-  .card .badge-rec {                            /* 框内水平居中、贴近底边 */
+  .card.d:hover { border-color: #7c2a1b; box-shadow: 0 16px 36px rgba(150,52,34,.20); }
+  .card.m:hover { border-color: #b3a077; }
+  .card .badge-rec {
     position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%);
-    font-size: 11.5px; font-weight: 700; letter-spacing: .5px; color: #fff;
-    background: linear-gradient(135deg, #f59e0b 0%, #ef4444 100%);
-    border-radius: 999px; padding: 4px 12px;
-    box-shadow: 0 4px 12px rgba(239,68,68,.26);
+    font-size: 12px; font-weight: 700; letter-spacing: 2px; color: #f7f1e0;
+    background: #963422;
+    border-radius: 999px; padding: 5px 16px;
+    box-shadow: 0 4px 12px rgba(150,52,34,.30);
   }
-  .card h2 { margin: 0 0 6px; font-size: 17px; font-weight: 680; }
-  .card p  { margin: 0; font-size: 13px; color: #5b6472; line-height: 1.65; }
+  .card h2 { margin: 0 0 10px; font-size: 20px; font-weight: 800; color: #161209; }
+  .card p  { margin: 0; font-size: 13.5px; color: #6b6455; line-height: 1.7; }
   .card .tag {
-    display: inline-block; margin-top: 12px; font-size: 11.5px; color: #1f6feb;
-    background: #eff4ff; border-radius: 5px; padding: 3px 8px;
+    display: inline-block; margin-top: 14px; font-size: 11.5px; color: #963422;
+    background: rgba(150,52,34,.08); border-radius: 5px; padding: 3px 10px;
   }
-  .foot { margin-top: 26px; font-size: 12px; color: #8b93a1; }
-  .foot a { color: #5b6472; }
-  .remember { margin-top: 14px; font-size: 12.5px; color: #5b6472; }
+  .foot { margin-top: 26px; font-size: 12px; color: #8d8574; }
+  .foot a { color: #6b6455; }
+  .remember { margin-top: 14px; font-size: 12.5px; color: #6b6455; }
   .remember input { vertical-align: -2px; margin-right: 6px; }
 </style>
 </head>
@@ -91,7 +90,7 @@
   <div class="foot">随时可在页面里点「切换版本」重新选择</div>
 </div>
 
-<script src="data/beiyuan.js?v=208"></script>
+<script src="data/beiyuan.js?v=209"></script>
 <script>
 (function () {
   var SAVED = null;

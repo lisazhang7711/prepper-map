@@ -113,12 +113,9 @@
     return Math.max(0, Math.min(1,
       (Math.log(Math.max(n, 30)) - Math.log(60)) / (Math.log(3000) - Math.log(60))));
   }
-  function densCol(n) {
-    const s = Math.max(6, Math.min(100, Math.round(100 * densRate(n))));
-    if (s >= 82) return "#7f1d1d"; if (s >= 68) return "#991b1b";
-    if (s >= 55) return "#b91c1c"; if (s >= 42) return "#dc2626";
-    if (s >= 28) return "#ef4444"; if (s >= 16) return "#f87171";
-    return "#fca5a5";
+  /* 人群一律类目灰：灰的深浅与人口密度无关，密度只体现在圆点大小 */
+  function densCol() {
+    return (CATS.people && CATS.people.color) || "#475569";
   }
 
   function pinEl(cat, isSel, col, sc) {
@@ -174,7 +171,7 @@
       if (!n) return;
       const d = document.createElement("div");
       d.className = "m-chip" + (hidden.has(k) ? " off" : "");
-      const swg = (k === 'people') ? 'background:linear-gradient(135deg,#fca5a5,#7f1d1d)' : ('background:' + cat.color);
+      const swg = 'background:' + cat.color;
       d.innerHTML = '<i style="' + swg + '"></i>' + cat.zh + " " + n;
       d.addEventListener("click", () => {
         if (hidden.has(k)) hidden.delete(k); else hidden.add(k);
@@ -221,7 +218,7 @@
       if (!n) return;
       const d = document.createElement("div");
       d.className = "m-lg" + (hidden.has(k) ? " off" : "");
-      const sw2 = (k === 'people') ? 'background:linear-gradient(135deg,#fca5a5,#7f1d1d)' : ('background:' + cat.color);
+      const sw2 = 'background:' + cat.color;
     d.innerHTML = '<i style="' + sw2 + '">' + cat.icon + '</i>'
         + '<span class="ln">' + cat.zh + '</span><span class="lc">' + n + '</span>';
       d.addEventListener("click", () => {

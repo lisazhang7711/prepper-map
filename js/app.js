@@ -43,6 +43,9 @@
   const PLOT_KEY = CATS.plot ? "plot" : "farm";
   const PLOT_COLOR = (CATS[PLOT_KEY] || { color: "#8B5CF6" }).color;
   const PLOT_NEAR_M = 50;     // 「宅边地块」：离最近建筑 50 m 以内
+  /* 人群（出入口/地铁/学校/商场）一律用类目灰，不按密度分色：
+     灰的深浅与人口密度无关，密度只体现在圆点大小上 */
+  const PEOPLE_GRAY = (CATS.people && CATS.people.color) || "#475569";
   const DEG_M = 111320;
 
   /* ==========================================================
@@ -107,7 +110,7 @@
             : (p.sub === "mall") ? { n: 1500, why: "商场高峰客流当量" }
             : peopleCount(p);
     const s = densScore(r.n);
-    PD[p.i] = { n: r.n, s: s, col: densColor(s), why: r.why };
+    PD[p.i] = { n: r.n, s: s, col: PEOPLE_GRAY, why: r.why };
   });
 
   /* ==========================================================
@@ -368,7 +371,7 @@
     g.beginPath(); g.arc(PADX + DOT / 2, PADY + DOT / 2, DOT / 2, 0, Math.PI * 2);
     g.fillStyle = col; g.fill();
     g.font = "600 15px 'Segoe UI Symbol','PingFang SC',sans-serif";
-    g.fillStyle = (p.c === "hardware" || (PD[p.i] && PD[p.i].s < 42)) ? "#7f1d1d" : "#ffffff";
+    g.fillStyle = (p.c === "hardware") ? "#7f1d1d" : "#ffffff";
     g.textAlign = "center"; g.textBaseline = "middle";
     g.fillText(CATS[p.c].icon, PADX + DOT / 2, PADY + DOT / 2 + 1);
 
@@ -412,7 +415,7 @@
     }
     g.beginPath(); g.arc(S / 2, S / 2, r, 0, Math.PI * 2);
     g.fillStyle = color; g.fill();
-    g.lineWidth = 2.6; g.strokeStyle = "rgba(255,255,255,.98)"; g.stroke();
+    g.lineWidth = 2.6; g.strokeStyle = color; g.stroke();
     g.font = "600 " + (r > 11.5 ? 13 : 12) + "px 'Segoe UI Symbol','PingFang SC',sans-serif";
     g.fillStyle = dark ? "#7f1d1d" : "#ffffff";
     g.textAlign = "center"; g.textBaseline = "middle";
@@ -426,7 +429,7 @@
       near: makeCard(p, true),
       nearNo: makeCard(p, false),
       dot: makeDot(PD[p.i] ? PD[p.i].col : CATS[p.c].color, CATS[p.c].icon,
-                   p.c === "hardware" || (PD[p.i] && PD[p.i].s < 42),
+                   p.c === "hardware",
                    PW_COLOR[p.pw] || PW_COLOR.na,
                    PD[p.i] ? PD[p.i].s / 100 : 0.5)
     };
@@ -850,9 +853,7 @@
       const div = document.createElement("div");
       div.className = "lg";
       div.dataset.cat = k;
-      const sw = (k === "people")
-        ? `background:linear-gradient(135deg,#fca5a5,#7f1d1d)`   // 人群按密度渐变：浅红人少→深红人多
-        : `background:${c.color}`;
+      const sw = `background:${c.color}`;   // 人群统一灰：不按密度分色
       div.innerHTML =
         `<span class="sw" style="${sw}"></span>
          <span class="tx"><span class="t1">${c.zh}</span><span class="t2">${CAT_DESC[k]}</span></span>
@@ -874,7 +875,7 @@
     hazard: "化工、监狱、油气储库——规划时绕行",
     strong: "高层酒店据点 / 建材加固物资",
     plot: "可种地（采光通风评分 + 作物产能）",
-    people: "出入口、地铁、学校——颜色越深人越多，点越大人越多",
+    people: "出入口、地铁、学校——统一灰色，点越大表示人流越大",
     // 旧版兜底
     supermarket: "主食 / 罐头 / 瓶装水集中点",
     medical2: "医院、门诊、药房与急救耗材",

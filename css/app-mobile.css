@@ -181,7 +181,7 @@ html, body {
   width: 26px; height: 26px; border-radius: 50%;
   background: var(--pc, #666); color: #fff;
   font-size: 13px; font-weight: 700; line-height: 26px; text-align: center;
-  border: 2px solid #fff; box-shadow: 0 2px 6px rgba(15,23,42,.35);
+  border: 2px solid var(--pc, #666); box-shadow: 0 2px 6px rgba(15,23,42,.35);
   font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
 }
 .pm-pin.sel { width: 34px; height: 34px; line-height: 30px; font-size: 16px; }
